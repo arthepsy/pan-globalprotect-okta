@@ -24,7 +24,7 @@
    THE SOFTWARE.
 """
 from __future__ import print_function
-import io, os, sys, re, json, base64
+import io, os, sys, re, json, base64, getpass
 from lxml import etree
 import requests
 
@@ -98,7 +98,7 @@ def load_conf(cf):
 	if 'username' not in conf:
 		conf['username'] = raw_input('username: ').strip()
 	if 'password' not in conf:
-		conf['password'] = raw_input('password: ').strip()
+		conf['password'] = getpass.getpass('password: ').strip()
 	for k in keys:
 		if k not in conf:
 			err('missing configuration key: {0}'.format(k))
