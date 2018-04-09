@@ -84,7 +84,7 @@ def parse_form(html):
 
 def load_conf(cf):
 	conf = {}
-	keys = ['username', 'password', 'okta_url', 'vpn_url', 'totp_secret']
+	keys = ['vpn_url', 'username', 'password', 'okta_url']
 	with io.open(cf, 'r', encoding='utf-8') as fp:
 		for rline in fp:
 			line = rline.strip()
@@ -95,9 +95,16 @@ def load_conf(cf):
 					if re.match('^{0}.*{0}$'.format(q), v):
 						v = v[1:-1]
 				conf[k] = v
+	if 'username' not in conf:
+		conf['username'] = raw_input('username: ').strip()
+	if 'password' not in conf:
+		conf['password'] = raw_input('password: ').strip()
 	for k in keys:
 		if k not in conf:
 			err('missing configuration key: {0}'.format(k))
+		else:
+			if len(conf[k].strip()) == 0:
+				err('empty configuration key: {0}'.format(k))
 	conf['debug'] = conf.get('debug', '').lower() in ['1', 'true']
 	return conf
 
@@ -174,9 +181,6 @@ def okta_auth(conf, s):
 	return session_token
 
 def okta_mfa(conf, s, j):
-	totp_secret = conf.get('totp_secret', '').strip()
-	if len(totp_secret) == 0:
-		err('totp_secret not defined')
 	state_token = j.get('stateToken', '').strip()
 	if len(state_token) == 0:
 		err('empty state token')
@@ -198,13 +202,21 @@ def okta_mfa(conf, s, j):
 	dbg(conf.get('debug'), 'factor', factor_id, factor_type, factor_url)
 	if factor_type != 'token:software:totp':
 		err('factor is not totp type')
-	import pyotp
-	totp = pyotp.TOTP(totp_secret)
-	pass_code = totp.now()
+
+	totp_code = None
+	totp_secret = conf.get('totp_secret', '').strip()
+	if len(totp_secret) == 0:
+		totp_code = raw_input('TOTP: ').strip()
+		if len(totp_code) == 0:
+			err('empty totp')
+	if totp_code is None:
+		import pyotp
+		totp = pyotp.TOTP(totp_secret)
+		totp_code = totp.now()
 	data = {
 		'factorId': factor_id,
 		'stateToken': state_token,
-		'passCode': pass_code,
+		'passCode': totp_code,
 	}
 	log('mfa request')
 	r = s.post(factor_url, headers=hdr_json(), data=json.dumps(data))
