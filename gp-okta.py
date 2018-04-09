@@ -267,7 +267,7 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 		'clientVer': '4100',
 		'clientos': 'Windows',
 		'clientgpversion': '4.1.0.98',
-		'computer': 'SECMOO',
+		'computer': 'DESKTOP',
 		'os-version': 'Microsoft Windows 10 Pro, 64-bit',
 		# 'host-id': '00:11:22:33:44:55'
 		'prelogin-cookie': prelogin_cookie,
