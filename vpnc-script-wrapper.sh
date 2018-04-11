@@ -2,12 +2,14 @@
 
 _VPNC_SCRIPT="/usr/local/sbin/vpnc-script"
 
+# addr/mask/masklen
 _ROUTES="
 10.0.0.0/255.0.0.0/8
 192.168.0.0/255.255.0.0/16
 "
+# zone [insecure]
 _DOMAINS="
-example.com
+example.com 0
 "
 
 OIFS=$IFS; NLIFS='
@@ -76,12 +78,18 @@ adjust_dns()
 	_unbound=$(_get_unbound) || { echo "err: unbound not found" >&2 && exit 1; }
 	IFS=$NLIFS
 	for _line in ${_DOMAINS}; do
-		_split "${_line}" ' ' _domain _
+		_split "${_line}" ' ' _domain _insecure _
 		if [ X"${reason}" = X"connect" ]; then
+			if [ X"${_insecure}" = X"1" ]; then
+				${_unbound} insecure_add "${_domain}"
+			fi
 			${_unbound} forward_add +i "${_domain}" "${_dns}"
 			${_unbound} flush_requestlist
 			${_unbound} flush_zone "${_domain}"
 		elif [ X"${reason}" = X"disconnect" ]; then
+			if [ X"${_insecure}" = X"1" ]; then
+				${_unbound} insecure_remove "${_domain}"
+			fi
 			${_unbound} forward_remove +i "${_domain}" 
 			${_unbound} flush_zone "${_domain}"
 			${_unbound} flush_requestlist 
