@@ -305,7 +305,7 @@ def main():
 	userauthcookie = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
 	log('portal-userauthcookie: {0}'.format(userauthcookie))
 	
-	cmd = '\necho "{1}" | openconnect --protocol=gp -u "{0}"/portal:portal-userauthcookie --passwd-on-stdin {2}'
+	cmd = '\necho "{1}" | openconnect --protocol=gp -u "{0}" --usergroup portal:portal-userauthcookie --passwd-on-stdin {2}'
 	print(cmd.format(saml_username, userauthcookie, conf.get('vpn_url')))
 
 
