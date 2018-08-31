@@ -184,47 +184,68 @@ def okta_mfa(conf, s, j):
 	state_token = j.get('stateToken', '').strip()
 	if len(state_token) == 0:
 		err('empty state token')
-	factors = j.get('_embedded', {}).get('factors', [])
+	factors_json = j.get('_embedded', {}).get('factors', [])
+	if len(factors_json) == 0:
+		err('no factors found')
+	factors = []
+	for factor in factors_json:
+		factor_id = factor.get('id', '').strip()
+		factor_type = factor.get('factorType', '').strip().lower()
+		provider = factor.get('provider', '').strip().lower()
+		factor_url = factor.get('_links', {}).get('verify', {}).get('href')
+		if len(factor_type) == 0 or len(provider) == 0 or len(factor_url) == 0:
+			continue
+		factors.append({
+			'id': factor_id,
+			'type': factor_type,
+			'provider': provider,
+			'url': factor_url})
+	dbg(conf.get('debug'), 'factors', factors)
 	if len(factors) == 0:
 		err('no factors found')
-	factor_id = None
-	factor_type = None
-	factor_url = None
-	for factor in factors:
-		factor_id = factor.get('id', '').strip()
-		factor_type = factor.get('factorType', '').strip()
-		provider = factor.get('provider', '').strip()
-		if provider.lower() == 'google':
-			factor_url = factor.get('_links', {}).get('verify', {}).get('href')
-			break
-	if not factor_url:
-		err('no factor url found')
-	dbg(conf.get('debug'), 'factor', factor_id, factor_type, factor_url)
-	if factor_type != 'token:software:totp':
-		err('factor is not totp type')
+	totp_factors = [x for x in factors if x.get('type') == 'token:software:totp']
+	dbg(conf.get('debug'), 'topt_factors', totp_factors)
+	if len(totp_factors) == 0:
+		err('no totp factors found')
+	return okta_mfa_totp(conf, s, totp_factors, state_token)
 
-	totp_code = None
-	totp_secret = conf.get('totp_secret', '').strip()
-	if len(totp_secret) == 0:
-		totp_code = raw_input('TOTP: ').strip()
-		if len(totp_code) == 0:
-			err('empty totp')
-	if totp_code is None:
-		import pyotp
-		totp = pyotp.TOTP(totp_secret)
-		totp_code = totp.now()
-	data = {
-		'factorId': factor_id,
-		'stateToken': state_token,
-		'passCode': totp_code,
-	}
-	log('mfa request')
-	r = s.post(factor_url, headers=hdr_json(), data=json.dumps(data))
-	if r.status_code != 200:
-		err('okta mfa request failed. {0}'.format(reprr(r)))
-	dbg(conf.get('debug'), 'mfa.response', r.status_code, r.text)
-	j = parse_rjson(r)
-	return j.get('sessionToken', '').strip()
+def okta_mfa_totp(conf, s, factors, state_token):
+	for factor in factors:
+		provider = factor.get('provider', '')
+		secret = conf.get('totp.{0}'.format(provider))
+		if secret is None:
+			order = 2
+		elif len(secret) == 0:
+			order = 1
+		else:
+			order = 0
+		factor['order'] = order
+	for factor in sorted(factors, key=lambda x: x.get('order', 0)):
+		provider = factor.get('provider', '')
+		secret = conf.get('totp.{0}'.format(provider), '') or ''
+		code = None
+		if len(secret) == 0:
+			code = raw_input('{0} TOTP: '.format(provider)).strip()
+		else:
+			import pyotp
+			totp = pyotp.TOTP(secret)
+			code = totp.now()
+		code = code or ''
+		if len(code) == 0:
+			continue
+		data = {
+			'factorId': factor.get('id'),
+			'stateToken': state_token,
+			'passCode': code
+		}
+		log('mfa {0} totp request'.format(provider))
+		r = s.post(factor.get('url'), headers=hdr_json(), data=json.dumps(data))
+		if r.status_code != 200:
+			err('okta mfa request failed. {0}'.format(reprr(r)))
+		dbg(conf.get('debug'), 'mfa.response', r.status_code, r.text)
+		j = parse_rjson(r)
+		return j.get('sessionToken', '').strip()
+	err('no totp was processed')
 
 def okta_redirect(conf, s, session_token, redirect_url):
 	data = {
