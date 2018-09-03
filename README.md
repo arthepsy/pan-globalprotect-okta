@@ -7,8 +7,7 @@ for creating actual VPN connection.
 
 It also supports Google and OKTA two factor authentication and can work without
 user interaction, if initial TOTP secret is provided. Otherwise, it will ask for
-generated code. If this feature will be used, [pyotp](https://github.com/pyotp/pyotp)
-dependency is required.
+generated code.
 
 To gather TOTP secret, there are two possibilities - either scan the provided QR
 code with _normal_ QR code scanner and write down the secret. Or create backup
@@ -16,6 +15,10 @@ from current OTP application in phone. Some applications have this feature, but
 some don't. For example, andOTP on Android do support this feature.
 
 ## usage
+This utility depends on [requests](http://www.python-requests.org/) and [lxml](https://lxml.de/)
+Python libraries. If TOTP secret is being used, then [pyotp](https://github.com/pyotp/pyotp)
+is also required.
+
 ```
    ./gp-okta.py gp-okta.conf
 ```
