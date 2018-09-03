@@ -88,7 +88,7 @@ def load_conf(cf):
 	with io.open(cf, 'r', encoding='utf-8') as fp:
 		for rline in fp:
 			line = rline.strip()
-			mx = re.match('^\s*([^=\s]+)\s*=\s*([^\s]+)', line)
+			mx = re.match('^\s*([^=\s]+)\s*=\s*(.*?)\s*$', line)
 			if mx:
 				k, v = mx.group(1).lower(), mx.group(2)
 				for q in '"\'':
@@ -326,8 +326,18 @@ def main():
 	userauthcookie = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
 	log('portal-userauthcookie: {0}'.format(userauthcookie))
 	
-	cmd = '\necho "{1}" | openconnect --protocol=gp -u "{0}" --usergroup portal:portal-userauthcookie --passwd-on-stdin {2}'
-	print(cmd.format(saml_username, userauthcookie, conf.get('vpn_url')))
+	cmd = 'openconnect --protocol=gp -u "{0}"'
+	cmd += ' --usergroup portal:portal-userauthcookie'
+	cmd += ' --passwd-on-stdin "{2}"'
+	gateway = (conf.get('gateway') or '').strip()
+	args = [saml_username, userauthcookie, conf.get('vpn_url')]
+	nlbug = '\\n' if conf.get('bug.nl', '').lower() in ['1', 'true'] else ''
+	if len(gateway) > 0:
+		cmd = '\nprintf "' + nlbug + '{1}\\n{3}" | ' + cmd
+		args.append(gateway)
+	else:
+		cmd = '\nprintf "' + nlbug + '{1}" | ' + cmd
+	print(cmd.format(*args))
 
 
 if __name__ == '__main__':
