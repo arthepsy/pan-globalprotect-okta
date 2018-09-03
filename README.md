@@ -27,10 +27,10 @@ is also required.
 
 Configuration file should be self-explanatory. Options can be overridden with
 `GP_` prefixed respective environment variables, e.g., `GP_PASSWORD` will
-override `username` option in configuration file.
+override `password` option in configuration file.
 
 ## known issues
 
 If `openconnect` returns with `ioctl` error, then this version has a bug, which
 requires to prefix stdin input with a newline. Set `bug.nl=1` in configuration
-file.
+file to work-around this issue.
