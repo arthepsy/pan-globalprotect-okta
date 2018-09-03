@@ -29,5 +29,5 @@ override `username` option in configuration file.
 ## known issues
 
 If `openconnect` returns with `ioctl` error, then this version has a bug, which
-requires to prefix stdin input with a newline. Set `bg.nl=1` in configuration
+requires to prefix stdin input with a newline. Set `bug.nl=1` in configuration
 file.
