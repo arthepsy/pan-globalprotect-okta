@@ -24,7 +24,7 @@
    THE SOFTWARE.
 """
 from __future__ import print_function
-import io, os, sys, re, json, base64, getpass
+import io, os, sys, re, json, base64, getpass, subprocess
 from lxml import etree
 import requests
 
@@ -88,16 +88,25 @@ def load_conf(cf):
 	with io.open(cf, 'r', encoding='utf-8') as fp:
 		for rline in fp:
 			line = rline.strip()
-			mx = re.match('^\s*([^=\s]+)\s*=\s*(.*?)\s*$', line)
+			mx = re.match('^\s*([^=\s]+)\s*=\s*(.*?)\s*(?:#\s+.*)?\s*$', line)
 			if mx:
 				k, v = mx.group(1).lower(), mx.group(2)
+				if k.startswith('#'):
+					continue
 				for q in '"\'':
 					if re.match('^{0}.*{0}$'.format(q), v):
 						v = v[1:-1]
 				conf[k] = v
-	if 'username' not in conf:
+	for k, v in os.environ.items():
+		k = k.lower()
+		if k.startswith('gp_'):
+			k = k[3:]
+			if len(k) == 0:
+				continue
+			conf[k] = v.strip()
+	if len(conf.get('username', '').strip()) == 0:
 		conf['username'] = raw_input('username: ').strip()
-	if 'password' not in conf:
+	if len(conf.get('password', '').strip()) == 0:
 		conf['password'] = getpass.getpass('password: ').strip()
 	for k in keys:
 		if k not in conf:
@@ -108,7 +117,6 @@ def load_conf(cf):
 	conf['debug'] = conf.get('debug', '').lower() in ['1', 'true']
 	return conf
 
-	
 def paloalto_prelogin(conf, s):
 	log('prelogin request')
 	r = s.get('{0}/global-protect/prelogin.esp'.format(conf.get('vpn_url')))
@@ -326,9 +334,10 @@ def main():
 	userauthcookie = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
 	log('portal-userauthcookie: {0}'.format(userauthcookie))
 	
-	cmd = 'openconnect --protocol=gp -u "{0}"'
+	cmd = conf.get('openconnect_cmd') or 'openconnect'
+	cmd += ' --protocol=gp -u "{0}"'
 	cmd += ' --usergroup portal:portal-userauthcookie'
-	cmd += ' --passwd-on-stdin "{2}"'
+	cmd += ' --passwd-on-stdin ' + conf.get('openconnect_args') + ' "{2}"'
 	gateway = (conf.get('gateway') or '').strip()
 	args = [saml_username, userauthcookie, conf.get('vpn_url')]
 	nlbug = '\\n' if conf.get('bug.nl', '').lower() in ['1', 'true'] else ''
@@ -337,7 +346,10 @@ def main():
 		args.append(gateway)
 	else:
 		cmd = '\nprintf "' + nlbug + '{1}" | ' + cmd
-	print(cmd.format(*args))
+	if conf.get('execute', '').lower() in ['1', 'true']:
+		subprocess.call(cmd.format(*args), shell=True)
+	else:
+		print(cmd.format(*args))
 
 
 if __name__ == '__main__':
