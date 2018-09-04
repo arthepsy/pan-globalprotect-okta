@@ -102,32 +102,9 @@ adjust_dns()
 	fi
 }
 
-do_connect() {
-	output_routes
-	adjust_routes
-	output_dns
-	adjust_dns
-}
+output_routes
+adjust_routes
+output_dns
+adjust_dns
 
-case "$reason" in
-	pre-init)
-		${_VPNC_SCRIPT} $@
-		;;
-	connect)
-		do_connect
-		${_VPNC_SCRIPT} $@
-		;;
-	disconnect)
-		${_VPNC_SCRIPT} $@
-		;;
-	reconnect)
-		do_connect
-		${_VPNC_SCRIPT} $@
-		;;
-	*)
-		echo "unknown reason '$reason'. Maybe vpnc-script is out of date" 1>&2
-		exit 1
-		;;
-esac
-
-
+${_VPNC_SCRIPT} $@
