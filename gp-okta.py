@@ -24,7 +24,7 @@
    THE SOFTWARE.
 """
 from __future__ import print_function
-import io, os, sys, re, json, base64, getpass, subprocess
+import io, os, sys, re, json, base64, getpass, subprocess, shlex
 from lxml import etree
 import requests
 
@@ -337,19 +337,24 @@ def main():
 	cmd = conf.get('openconnect_cmd') or 'openconnect'
 	cmd += ' --protocol=gp -u "{0}"'
 	cmd += ' --usergroup portal:portal-userauthcookie'
-	cmd += ' --passwd-on-stdin ' + conf.get('openconnect_args') + ' "{2}"'
-	gateway = (conf.get('gateway') or '').strip()
-	args = [saml_username, userauthcookie, conf.get('vpn_url')]
+	cmd += ' --passwd-on-stdin ' + conf.get('openconnect_args') + ' "{1}"'
+	cmd = cmd.format(saml_username, conf.get('vpn_url'))
+	gw = (conf.get('gateway') or '').strip()
 	nlbug = '\\n' if conf.get('bug.nl', '').lower() in ['1', 'true'] else ''
-	if len(gateway) > 0:
-		cmd = '\nprintf "' + nlbug + '{1}\\n{3}" | ' + cmd
-		args.append(gateway)
+	if len(gw) > 0:
+		pcmd = 'printf "' + nlbug + '{0}\\n{1}"'.format(userauthcookie, gw)
 	else:
-		cmd = '\nprintf "' + nlbug + '{1}" | ' + cmd
+		pcmd = 'printf "' + nlbug + '{0}"'.format(userauthcookie)
+	print()
 	if conf.get('execute', '').lower() in ['1', 'true']:
-		subprocess.call(cmd.format(*args), shell=True)
+		cmd = shlex.split(cmd)
+		cmd = [os.path.expandvars(os.path.expanduser(x)) for x in cmd]
+		pp = subprocess.Popen(shlex.split(pcmd), stdout=subprocess.PIPE)
+		cp = subprocess.Popen(cmd, stdin=pp.stdout, stdout=subprocess.PIPE)
+		pp.stdout.close()
+		cp.communicate()
 	else:
-		print(cmd.format(*args))
+		print('{0} | {1}'.format(pcmd, cmd))
 
 
 if __name__ == '__main__':
