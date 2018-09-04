@@ -23,15 +23,16 @@ _split() {
 }
 
 _get_unbound() {
-        command -v /usr/local/sbin/unbound-control >/dev/null 2>&1 \
-		&& echo "/usr/local/sbin/unbound-control" && return 0
-        command -v unbound-control >/dev/null 2>&1 \
-		&& echo "unbound-control"  && return 0
-        return 1
+	command -v /usr/local/sbin/unbound-control >/dev/null 2>&1 \
+	&& echo "/usr/local/sbin/unbound-control" && return 0
+	command -v unbound-control >/dev/null 2>&1 \
+	&& echo "unbound-control"  && return 0
+	return 1
 }
 
 output_routes()
 {
+	[ X"${reason}" != X"connect" ] && return
 	if [ -n "${CISCO_SPLIT_INC}" ]; then
 		_i=0
 		while [ ${_i} -lt ${CISCO_SPLIT_INC} ] ; do
@@ -57,6 +58,9 @@ adjust_routes()
 		export CISCO_SPLIT_INC_${_i}_ADDR="${_addr}"
 		export CISCO_SPLIT_INC_${_i}_MASK="${_mask}"
 		export CISCO_SPLIT_INC_${_i}_MASKLEN="${_masklen}"
+		if [ X"${reason}" = X"connect" ]; then
+			echo "new.route: ${_addr}/${_masklen}"
+		fi
 		_i=$(expr ${_i} + 1)
 	done
 	export CISCO_SPLIT_INC=${_i}
@@ -65,41 +69,39 @@ adjust_routes()
 
 output_dns()
 {
+	[ X"${reason}" != X"connect" ] && return
 	echo "orig.dns: ${INTERNAL_IP4_DNS}"
 	echo "orig.domain: ${CISCO_DEF_DOMAIN}"
 }
 
 adjust_dns()
 {
-	if [[ $(_get_unbound) ]]; then
-		_dns="${INTERNAL_IP4_DNS}"
-		unset CISCO_DEF_DOMAIN
-		unset INTERNAL_IP4_DNS
-		[ -z "${_dns}" ] && return
-		_unbound=$(_get_unbound)
-		IFS=$NLIFS
-		for _line in ${_DOMAINS}; do
-			_split "${_line}" ' ' _domain _insecure _
-			if [ X"${reason}" = X"connect" ]; then
-				if [ X"${_insecure}" = X"1" ]; then
-					${_unbound} insecure_add "${_domain}"
-				fi
-				${_unbound} forward_add +i "${_domain}" "${_dns}"
-				${_unbound} flush_requestlist
-				${_unbound} flush_zone "${_domain}"
-			elif [ X"${reason}" = X"disconnect" ]; then
-				if [ X"${_insecure}" = X"1" ]; then
-					${_unbound} insecure_remove "${_domain}"
-				fi
-				${_unbound} forward_remove +i "${_domain}"
-				${_unbound} flush_zone "${_domain}"
-				${_unbound} flush_requestlist
+	_dns="${INTERNAL_IP4_DNS}"
+	[ -z "${_dns}" ] && return
+	_unbound=$(_get_unbound) || \
+		{ echo "warn: unbound not found" >&2 && return; }
+	unset CISCO_DEF_DOMAIN
+	unset INTERNAL_IP4_DNS
+	IFS=$NLIFS
+	for _line in ${_DOMAINS}; do
+		_split "${_line}" ' ' _domain _insecure _
+		if [ X"${reason}" = X"connect" ]; then
+			if [ X"${_insecure}" = X"1" ]; then
+				${_unbound} insecure_add "${_domain}"
 			fi
-		done
-		IFS=$OIFS
-	else
-		echo "warn: unbound not found, will not change dns" >&2
-	fi
+			${_unbound} forward_add +i "${_domain}" "${_dns}"
+			${_unbound} flush_requestlist
+			${_unbound} flush_zone "${_domain}"
+		elif [ X"${reason}" = X"disconnect" ]; then
+			if [ X"${_insecure}" = X"1" ]; then
+				${_unbound} insecure_remove "${_domain}"
+			fi
+			${_unbound} forward_remove +i "${_domain}" 
+			${_unbound} flush_zone "${_domain}"
+			${_unbound} flush_requestlist 
+		fi
+	done
+	IFS=$OIFS
 }
 
 output_routes
