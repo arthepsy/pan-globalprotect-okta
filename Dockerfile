@@ -1,22 +1,25 @@
-FROM alpine:3.8
+FROM	alpine:3.8
 
-WORKDIR /
+WORKDIR	/
 
-RUN apk add -U openssl openssl-dev bash curl tar wget nano build-base ca-certificates automake gcc abuild binutils \
- && apk add python openssh-client libtool intltool autoconf libxml2-dev krb5-dev lz4 lz4-dev linux-headers py2-lxml py2-requests	git \
- && rm -rf /var/cache/apk/*
+RUN	apk add --no-cache \
+	curl git \
+	automake autoconf libtool gcc musl-dev make linux-headers \
+	gettext gnutls-dev libxml2-dev lz4-dev libproxy-dev \
+	py2-lxml py2-requests py2-pip \
+	&& rm -rf /var/cache/apk/*
+RUN  pip install pyotp
 
-RUN git clone https://github.com/dlenski/openconnect.git
-RUN mkdir -p /usr/local/sbin
-RUN wget http://git.infradead.org/users/dwmw2/vpnc-scripts.git/blob_plain/HEAD:/vpnc-script -O /usr/local/sbin/vpnc-script
-ADD vpnc-script-os /usr/local/sbin/vpnc-script
-RUN chmod +x /usr/local/sbin/vpnc-script
 
-WORKDIR /openconnect
+RUN	mkdir -p /usr/local/sbin
+RUN	curl -o /usr/local/sbin/vpnc-script http://git.infradead.org/users/dwmw2/vpnc-scripts.git/blob_plain/HEAD:/vpnc-script
+RUN	chmod +x /usr/local/sbin/vpnc-script
 
-RUN ./autogen.sh
-RUN ./configure --with-vpnc-script=/usr/local/bin/vpnc-script
-RUN make check
-RUN make
+RUN	git clone https://github.com/dlenski/openconnect.git
+WORKDIR	/openconnect
+RUN	./autogen.sh
+RUN	./configure --with-vpnc-script=/usr/local/bin/vpnc-script
+RUN	make check
+RUN	make
 
-CMD ["/openconnect/gp-okta/gp-okta.py", "/openconnect/gp-okta/gp-okta.conf"]
+CMD	["/openconnect/gp-okta/gp-okta.py","/openconnect/gp-okta/gp-okta.conf"]
