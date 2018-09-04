@@ -28,6 +28,17 @@ import io, os, sys, re, json, base64, getpass, subprocess, shlex
 from lxml import etree
 import requests
 
+if sys.version_info >= (3,):
+	text_type = str
+	binary_type = bytes
+else:
+	text_type = unicode
+	binary_type = str
+
+to_b = lambda v: v if isinstance(v, binary_type) else v.encode('utf-8')
+to_u = lambda v: v if isinstance(v, text_type) else v.decode('utf-8')
+
+
 def log(s):
 	print('[INFO] {0}'.format(s))
 
@@ -151,8 +162,8 @@ def okta_saml(conf, s, saml_xml):
 		err('did not find baseUrl in response')
 	if rx_from_uri is None:
 		err('did not find fromUri in response')
-	base_url = rx_base_url.group(1).decode('string_escape').strip()
-	from_uri = rx_from_uri.group(1).decode('string_escape').strip()
+	base_url = to_b(rx_base_url.group(1)).decode('unicode_escape').strip()
+	from_uri = to_b(rx_from_uri.group(1)).decode('unicode_escape').strip()
 	if from_uri.startswith('http'):
 		redirect_url = from_uri
 	else:
