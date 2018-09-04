@@ -25,17 +25,15 @@ is also required.
 
 ## docker
 
-Build image
+Build Docker image before running container:
 ```
-docker build -t openconnect .
+docker build -t gp-okta .
 ```
-Fill gp-okta.conf with information you want to provide
 
-launch docker with:
+Edit gp-okta.conf and launch Docker container:
 ```
-sh launch.sh
+sh run-docker.sh
 ```
-it will ask for username/password/second auth if not filled in gp-okta.conf
 
 ## configuration
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 conf_username=`grep username gp-okta.conf | awk -F \= '{print $2}' | tr -d " "`
 conf_password=`grep password gp-okta.conf | awk -F \= '{print $2}' | tr -d " "`
@@ -61,4 +61,4 @@ docker run \
     -e GP_USERNAME=${GP_USERNAME} \
     -v /etc/resolv.conf:/etc/resolv.conf \
     -v ${PWD}:/openconnect/gp-okta \
-    openconnect
+    gp-okta
