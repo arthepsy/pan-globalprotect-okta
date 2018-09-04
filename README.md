@@ -1,6 +1,6 @@
 # pan-globalprotect-okta
 
-Command-line client for PaloAlto Networks' GlobalProtect VPN, integrated with OKTA.
+Command-line client for PaloAlto Networks' GlobalProtect VPN, integrated with OKTA.  
 This utility will do the _authentication dance_ with OKTA to retrieve `portal-userauthcookie`,
 which will be passed to [OpenConnect with PAN GlobalProtect support](https://github.com/dlenski/openconnect)
 for creating actual VPN connection.
