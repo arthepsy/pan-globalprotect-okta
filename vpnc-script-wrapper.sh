@@ -71,31 +71,35 @@ output_dns()
 
 adjust_dns()
 {
-	_dns="${INTERNAL_IP4_DNS}"
-	unset CISCO_DEF_DOMAIN
-	unset INTERNAL_IP4_DNS
-	[ -z "${_dns}" ] && return
-	_unbound=$(_get_unbound) || { echo "warn: unbound not found, will not change dns" >&2 && exit 0; }
-	IFS=$NLIFS
-	for _line in ${_DOMAINS}; do
-		_split "${_line}" ' ' _domain _insecure _
-		if [ X"${reason}" = X"connect" ]; then
-			if [ X"${_insecure}" = X"1" ]; then
-				${_unbound} insecure_add "${_domain}"
+	if [[ $(_get_unbound) ]]; then
+		_dns="${INTERNAL_IP4_DNS}"
+		unset CISCO_DEF_DOMAIN
+		unset INTERNAL_IP4_DNS
+		[ -z "${_dns}" ] && return
+		_unbound=$(_get_unbound)
+		IFS=$NLIFS
+		for _line in ${_DOMAINS}; do
+			_split "${_line}" ' ' _domain _insecure _
+			if [ X"${reason}" = X"connect" ]; then
+				if [ X"${_insecure}" = X"1" ]; then
+					${_unbound} insecure_add "${_domain}"
+				fi
+				${_unbound} forward_add +i "${_domain}" "${_dns}"
+				${_unbound} flush_requestlist
+				${_unbound} flush_zone "${_domain}"
+			elif [ X"${reason}" = X"disconnect" ]; then
+				if [ X"${_insecure}" = X"1" ]; then
+					${_unbound} insecure_remove "${_domain}"
+				fi
+				${_unbound} forward_remove +i "${_domain}"
+				${_unbound} flush_zone "${_domain}"
+				${_unbound} flush_requestlist
 			fi
-			${_unbound} forward_add +i "${_domain}" "${_dns}"
-			${_unbound} flush_requestlist
-			${_unbound} flush_zone "${_domain}"
-		elif [ X"${reason}" = X"disconnect" ]; then
-			if [ X"${_insecure}" = X"1" ]; then
-				${_unbound} insecure_remove "${_domain}"
-			fi
-			${_unbound} forward_remove +i "${_domain}"
-			${_unbound} flush_zone "${_domain}"
-			${_unbound} flush_requestlist
-		fi
-	done
-	IFS=$OIFS
+		done
+		IFS=$OIFS
+	else
+		echo "warn: unbound not found, will not change dns" >&2
+	fi
 }
 
 do_connect() {
@@ -110,8 +114,8 @@ case "$reason" in
 		${_VPNC_SCRIPT} $@
 		;;
 	connect)
-		${_VPNC_SCRIPT} $@
 		do_connect
+		${_VPNC_SCRIPT} $@
 		;;
 	disconnect)
 		${_VPNC_SCRIPT} $@
