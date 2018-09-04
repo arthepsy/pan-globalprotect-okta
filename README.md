@@ -1,6 +1,6 @@
 # pan-globalprotect-okta
 
-Command-line client for PaloAlto Networks' GlobalProtect VPN, integrated with OKTA. 
+Command-line client for PaloAlto Networks' GlobalProtect VPN, integrated with OKTA.
 This utility will do the _authentication dance_ with OKTA to retrieve `portal-userauthcookie`,
 which will be passed to [OpenConnect with PAN GlobalProtect support](https://github.com/dlenski/openconnect)
 for creating actual VPN connection.
@@ -22,6 +22,20 @@ is also required.
 ```
    ./gp-okta.py gp-okta.conf
 ```
+
+## docker
+
+Build image
+```
+docker build -t openconnect .
+```
+Fill gp-okta.conf with information you want to provide
+
+launch docker with:
+```
+sh launch.sh
+```
+it will ask for username/password/second auth if not filled in gp-okta.conf
 
 ## configuration
 

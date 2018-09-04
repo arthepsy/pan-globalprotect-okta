@@ -75,7 +75,7 @@ adjust_dns()
 	unset CISCO_DEF_DOMAIN
 	unset INTERNAL_IP4_DNS
 	[ -z "${_dns}" ] && return
-	_unbound=$(_get_unbound) || { echo "err: unbound not found" >&2 && exit 1; }
+	_unbound=$(_get_unbound) || { echo "warn: unbound not found, will not change dns" >&2 && exit 0; }
 	IFS=$NLIFS
 	for _line in ${_DOMAINS}; do
 		_split "${_line}" ' ' _domain _insecure _
@@ -90,18 +90,40 @@ adjust_dns()
 			if [ X"${_insecure}" = X"1" ]; then
 				${_unbound} insecure_remove "${_domain}"
 			fi
-			${_unbound} forward_remove +i "${_domain}" 
+			${_unbound} forward_remove +i "${_domain}"
 			${_unbound} flush_zone "${_domain}"
-			${_unbound} flush_requestlist 
+			${_unbound} flush_requestlist
 		fi
 	done
 	IFS=$OIFS
 }
 
-output_routes
-adjust_routes
-output_dns
-adjust_dns
+do_connect() {
+	output_routes
+	adjust_routes
+	output_dns
+	adjust_dns
+}
 
-${_VPNC_SCRIPT} $@
+case "$reason" in
+	pre-init)
+		${_VPNC_SCRIPT} $@
+		;;
+	connect)
+		${_VPNC_SCRIPT} $@
+		do_connect
+		;;
+	disconnect)
+		${_VPNC_SCRIPT} $@
+		;;
+	reconnect)
+		do_connect
+		${_VPNC_SCRIPT} $@
+		;;
+	*)
+		echo "unknown reason '$reason'. Maybe vpnc-script is out of date" 1>&2
+		exit 1
+		;;
+esac
+
 
