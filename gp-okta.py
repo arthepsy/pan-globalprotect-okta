@@ -348,7 +348,7 @@ def main():
 	cmd = conf.get('openconnect_cmd') or 'openconnect'
 	cmd += ' --protocol=gp -u "{0}"'
 	cmd += ' --usergroup portal:portal-userauthcookie'
-	cmd += ' --passwd-on-stdin ' + conf.get('openconnect_args') + ' "{1}"'
+	cmd += ' --passwd-on-stdin ' + conf.get('openconnect_args', '') + ' "{1}"'
 	cmd = cmd.format(saml_username, conf.get('vpn_url'))
 	gw = (conf.get('gateway') or '').strip()
 	nlbug = '\\n' if conf.get('bug.nl', '').lower() in ['1', 'true'] else ''
@@ -363,10 +363,8 @@ def main():
 		pp = subprocess.Popen(shlex.split(pcmd), stdout=subprocess.PIPE)
 		cp = subprocess.Popen(cmd, stdin=pp.stdout, stdout=sys.stdout)
 		pp.stdout.close()
-
-		# Do not abort on SIGINT. openconnect will see it, and perform proper exit & cleanup
+		# Do not abort on SIGINT. openconnect will perform proper exit & cleanup
 		signal.signal(signal.SIGINT, signal.SIG_IGN)
-
 		cp.communicate()
 	else:
 		print('{0} | {1}'.format(pcmd, cmd))
