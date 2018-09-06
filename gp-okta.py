@@ -361,7 +361,7 @@ def main():
 		cmd = shlex.split(cmd)
 		cmd = [os.path.expandvars(os.path.expanduser(x)) for x in cmd]
 		pp = subprocess.Popen(shlex.split(pcmd), stdout=subprocess.PIPE)
-		cp = subprocess.Popen(cmd, stdin=pp.stdout, stdout=subprocess.PIPE)
+		cp = subprocess.Popen(cmd, stdin=pp.stdout, stdout=sys.stdout)
 		pp.stdout.close()
 		cp.communicate()
 	else:
