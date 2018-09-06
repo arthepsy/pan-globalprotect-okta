@@ -18,7 +18,7 @@ RUN	chmod +x /usr/local/sbin/vpnc-script
 RUN	git clone https://github.com/dlenski/openconnect.git
 WORKDIR	/openconnect
 RUN	./autogen.sh
-RUN	./configure --with-vpnc-script=/usr/local/bin/vpnc-script
+RUN	./configure --with-vpnc-script=/usr/local/sbin/vpnc-script
 RUN	make check
 RUN	make
 
