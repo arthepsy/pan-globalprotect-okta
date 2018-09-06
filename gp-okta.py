@@ -24,7 +24,7 @@
    THE SOFTWARE.
 """
 from __future__ import print_function
-import io, os, sys, re, json, base64, getpass, subprocess, shlex
+import io, os, sys, re, json, base64, getpass, subprocess, shlex, signal
 from lxml import etree
 import requests
 
@@ -363,6 +363,10 @@ def main():
 		pp = subprocess.Popen(shlex.split(pcmd), stdout=subprocess.PIPE)
 		cp = subprocess.Popen(cmd, stdin=pp.stdout, stdout=sys.stdout)
 		pp.stdout.close()
+
+		# Do not abort on SIGINT. openconnect will see it, and perform proper exit & cleanup
+		signal.signal(signal.SIGINT, signal.SIG_IGN)
+
 		cp.communicate()
 	else:
 		print('{0} | {1}'.format(pcmd, cmd))
