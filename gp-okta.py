@@ -153,7 +153,6 @@ def mfa_priority(conf, ftype, fprovider):
 		priority += (512 - line_nr)
 	return priority
 
-
 def get_redirect_url(conf, c, current_url = None):
 	rx_base_url = re.search(r'var\s*baseUrl\s*=\s*\'([^\']+)\'', c)
 	rx_from_uri = re.search(r'var\s*fromUri\s*=\s*\'([^\']+)\'', c)
@@ -193,9 +192,12 @@ def send_req(conf, s, name, url, data, **kwargs):
 	return r.headers, r.text
 
 
-def paloalto_prelogin(conf, s):
+def paloalto_prelogin(conf, s, again=False):
 	log('prelogin request')
-	url = '{0}/global-protect/prelogin.esp'.format(conf.get('vpn_url'))
+	if again:
+		url = '{0}/ssl-vpn/prelogin.esp'.format(conf.get('vpn_url'))
+	else:
+		url = '{0}/global-protect/prelogin.esp'.format(conf.get('vpn_url'))
 	h, c = send_req(conf, s, 'prelogin', url, {}, get=True)
 	x = parse_xml(c)
 	saml_req = x.find('.//saml-request')
@@ -411,6 +413,31 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 		err('empty portal_userauthcookie')
 	return portal_userauthcookie
 
+# Combined first half of okta_saml with second half of okta_redirect
+def okta_saml_2(conf, s, saml_xml):
+	log('okta saml request')
+	url, data = parse_form(saml_xml)
+	r = s.post(url, data=data)
+	if r.status_code != 200:
+		err('redirect request failed. {0}'.format(reprr(r)))
+	dbg(conf.get('debug'), 'redirect.response', r.status_code, r.text)
+	xhtml = parse_html(r.text)
+
+	url, data = parse_form(xhtml)
+	log('okta redirect form request')
+	r = s.post(url, data=data)
+	if r.status_code != 200:
+		err('redirect form request failed. {0}'.format(reprr(r)))
+	dbg(conf.get('debug'), 'form.response', r.status_code, r.text)
+	saml_username = r.headers.get('saml-username', '').strip()
+	if len(saml_username) == 0 and not again:
+		err('saml-username empty')
+	saml_auth_status = r.headers.get('saml-auth-status', '').strip()
+	saml_slo = r.headers.get('saml-slo', '').strip()
+	prelogin_cookie = r.headers.get('prelogin-cookie', '').strip()
+	if len(prelogin_cookie) == 0:
+		err('prelogin-cookie empty')
+	return saml_username, prelogin_cookie
 
 def main():
 	if len(sys.argv) < 2:
@@ -425,10 +452,16 @@ def main():
 	token = okta_auth(conf, s)
 	log('sessionToken: {0}'.format(token))
 	saml_username, prelogin_cookie = okta_redirect(conf, s, token, redirect_url)
-	log('saml-username: {0}'.format(saml_username))
-	log('prelogin-cookie: {0}'.format(prelogin_cookie))
 	userauthcookie = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
 	log('portal-userauthcookie: {0}'.format(userauthcookie))
+
+	# Another dance?
+	if conf.get('another_dance', '').lower() in ['1', 'true']:
+		saml_xml = paloalto_prelogin(conf, s, again=True)
+		saml_username, prelogin_cookie = okta_saml_2(conf, s, saml_xml)
+
+	log('saml-username: {0}'.format(saml_username))
+	log('prelogin-cookie: {0}'.format(prelogin_cookie))
 	
 	username = saml_username
 	cmd = conf.get('openconnect_cmd') or 'openconnect'
