@@ -462,13 +462,20 @@ def main():
 
 	log('saml-username: {0}'.format(saml_username))
 	log('prelogin-cookie: {0}'.format(prelogin_cookie))
+
+	if userauthcookie == 'empty' and prelogin_cookie != 'empty':
+	    cookie_type = "gateway:prelogin-cookie"
+	    cookie = prelogin_cookie
+	else:
+	    cookie_type = "portal:portal-userauthcookie"
+	    cookie = userauthcookie
 	
 	username = saml_username
 	cmd = conf.get('openconnect_cmd') or 'openconnect'
 	cmd += ' --protocol=gp -u \'{0}\''
-	cmd += ' --usergroup portal:portal-userauthcookie'
-	cmd += ' --passwd-on-stdin ' + conf.get('openconnect_args', '') + ' \'{1}\''
-	cmd = cmd.format(username, conf.get('vpn_url'))
+	cmd += ' --usergroup {1}'
+	cmd += ' --passwd-on-stdin ' + conf.get('openconnect_args', '') + ' \'{2}\''
+	cmd = cmd.format(username, cookie_type, conf.get('vpn_url'))
 	gw = (conf.get('gateway') or '').strip()
 	bugs = ''
 	if conf.get('bug.nl', '').lower() in ['1', 'true']:
@@ -476,9 +483,9 @@ def main():
 	if conf.get('bug.username', '').lower() in ['1', 'true']:
 		bugs += '{0}\\n'.format(username.replace('\\', '\\\\'))
 	if len(gw) > 0:
-		pcmd = 'printf \'' + bugs + '{0}\\n{1}\''.format(userauthcookie, gw)
+		pcmd = 'printf \'' + bugs + '{0}\\n{1}\''.format(cookie, gw)
 	else:
-		pcmd = 'printf \'' + bugs + '{0}\''.format(userauthcookie)
+		pcmd = 'printf \'' + bugs + '{0}\''.format(cookie)
 	print()
 	if conf.get('execute', '').lower() in ['1', 'true']:
 		cmd = shlex.split(cmd)
