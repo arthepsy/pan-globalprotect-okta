@@ -46,4 +46,9 @@ override `password` option in configuration file.
 
 If `openconnect` returns with `ioctl` error, then this version has a bug, which
 requires to prefix stdin input with a newline. Set `bug.nl=1` in configuration
-file to work-around this issue.
+file to work-around this issue.  
+
+If `openconnect` returns with `fgets (stdin): Resource temporarily unavailable`
+error, then this version has a bug, which requires to prefix stdin input with a
+username. Set `bug.username=1` in configuration file to work-around this issue.
+

@@ -345,17 +345,22 @@ def main():
 	userauthcookie = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
 	log('portal-userauthcookie: {0}'.format(userauthcookie))
 	
+	username = saml_username
 	cmd = conf.get('openconnect_cmd') or 'openconnect'
-	cmd += ' --protocol=gp -u "{0}"'
+	cmd += ' --protocol=gp -u \'{0}\''
 	cmd += ' --usergroup portal:portal-userauthcookie'
-	cmd += ' --passwd-on-stdin ' + conf.get('openconnect_args', '') + ' "{1}"'
-	cmd = cmd.format(saml_username, conf.get('vpn_url'))
+	cmd += ' --passwd-on-stdin ' + conf.get('openconnect_args', '') + ' \'{1}\''
+	cmd = cmd.format(username, conf.get('vpn_url'))
 	gw = (conf.get('gateway') or '').strip()
-	nlbug = '\\n' if conf.get('bug.nl', '').lower() in ['1', 'true'] else ''
+	bugs = ''
+	if conf.get('bug.nl', '').lower() in ['1', 'true']:
+		bugs += '\\n'
+	if conf.get('bug.username', '').lower() in ['1', 'true']:
+		bugs += '{0}\\n'.format(username.replace('\\', '\\\\'))
 	if len(gw) > 0:
-		pcmd = 'printf "' + nlbug + '{0}\\n{1}"'.format(userauthcookie, gw)
+		pcmd = 'printf \'' + bugs + '{0}\\n{1}\''.format(userauthcookie, gw)
 	else:
-		pcmd = 'printf "' + nlbug + '{0}"'.format(userauthcookie)
+		pcmd = 'printf \'' + bugs + '{0}\''.format(userauthcookie)
 	print()
 	if conf.get('execute', '').lower() in ['1', 'true']:
 		cmd = shlex.split(cmd)
