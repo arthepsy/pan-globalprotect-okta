@@ -34,6 +34,7 @@ if sys.version_info >= (3,):
 else:
 	text_type = unicode
 	binary_type = str
+	input = raw_input
 
 to_b = lambda v: v if isinstance(v, binary_type) else v.encode('utf-8')
 to_u = lambda v: v if isinstance(v, text_type) else v.decode('utf-8')
@@ -116,7 +117,7 @@ def load_conf(cf):
 				continue
 			conf[k] = v.strip()
 	if len(conf.get('username', '').strip()) == 0:
-		conf['username'] = raw_input('username: ').strip()
+		conf['username'] = input('username: ').strip()
 	if len(conf.get('password', '').strip()) == 0:
 		conf['password'] = getpass.getpass('password: ').strip()
 	for k in keys:
@@ -244,7 +245,7 @@ def okta_mfa_totp(conf, s, factors, state_token):
 		secret = conf.get('totp.{0}'.format(provider), '') or ''
 		code = None
 		if len(secret) == 0:
-			code = raw_input('{0} TOTP: '.format(provider)).strip()
+			code = input('{0} TOTP: '.format(provider)).strip()
 		else:
 			import pyotp
 			totp = pyotp.TOTP(secret)
