@@ -290,7 +290,26 @@ def okta_mfa_totp(conf, s, factor, state_token):
 	return j.get('sessionToken', '').strip()
 
 def okta_mfa_sms(conf, s, factor, state_token):
-	return None
+	provider = factor.get('provider', '')
+	data = {
+		'factorId': factor.get('id'),
+		'stateToken': state_token,
+	}
+	log('mfa {0} sms request'.format(provider))
+	r = s.post(factor.get('url'), headers=hdr_json(), data=json.dumps(data))
+	if r.status_code != 200:
+		err('okta mfa request failed. {0}'.format(reprr(r)))
+	dbg(conf.get('debug'), 'mfa.response', r.status_code, r.text)
+	code = input('{0} SMS verification code: '.format(provider)).strip()
+	if len(code) == 0:
+		return None
+	data['passCode'] = code
+	r = s.post(factor.get('url'), headers=hdr_json(), data=json.dumps(data))
+	if r.status_code != 200:
+		err('okta mfa request failed. {0}'.format(reprr(r)))
+	dbg(conf.get('debug'), 'mfa.response', r.status_code, r.text)
+	j = parse_rjson(r)
+	return j.get('sessionToken', '').strip()
 
 def okta_redirect(conf, s, session_token, redirect_url):
 	data = {
