@@ -97,8 +97,10 @@ def parse_form(html):
 def load_conf(cf):
 	conf = {}
 	keys = ['vpn_url', 'username', 'password', 'okta_url']
+	line_nr = 0
 	with io.open(cf, 'r', encoding='utf-8') as fp:
 		for rline in fp:
+			line_nr += 1
 			line = rline.strip()
 			mx = re.match('^\s*([^=\s]+)\s*=\s*(.*?)\s*(?:#\s+.*)?\s*$', line)
 			if mx:
@@ -109,6 +111,7 @@ def load_conf(cf):
 					if re.match('^{0}.*{0}$'.format(q), v):
 						v = v[1:-1]
 				conf[k] = v
+				conf['{0}.line'.format(k)] = line_nr
 	for k, v in os.environ.items():
 		k = k.lower()
 		if k.startswith('gp_'):
@@ -128,6 +131,29 @@ def load_conf(cf):
 				err('empty configuration key: {0}'.format(k))
 	conf['debug'] = conf.get('debug', '').lower() in ['1', 'true']
 	return conf
+
+def mfa_priority(conf, ftype, fprovider):
+	if ftype == 'token:software:totp':
+		ftype = 'totp'
+	if ftype not in ['totp', 'sms']:
+		return 0
+	mfa_order = conf.get('mfa_order', '')
+	if ftype in mfa_order:
+		priority = (10 - mfa_order.index(ftype)) * 100
+	else:
+		priority = 0
+	value = conf.get('{0}.{1}'.format(ftype, fprovider))
+	if ftype == 'sms':
+		if not (value or '').lower() in ['1', 'true']:
+			value = None
+	line_nr = conf.get('{0}.{1}.line'.format(ftype, fprovider), 0)
+	if value is None:
+		priority += 0
+	elif len(value) == 0:
+		priority += (128 - line_nr)
+	else:
+		priority += (512 - line_nr)
+	return priority
 
 def paloalto_prelogin(conf, s):
 	log('prelogin request')
@@ -219,53 +245,52 @@ def okta_mfa(conf, s, j):
 			'id': factor_id,
 			'type': factor_type,
 			'provider': provider,
+			'priority': mfa_priority(conf, factor_type, provider),
 			'url': factor_url})
 	dbg(conf.get('debug'), 'factors', factors)
 	if len(factors) == 0:
 		err('no factors found')
-	totp_factors = [x for x in factors if x.get('type') == 'token:software:totp']
-	dbg(conf.get('debug'), 'topt_factors', totp_factors)
-	if len(totp_factors) == 0:
-		err('no totp factors found')
-	return okta_mfa_totp(conf, s, totp_factors, state_token)
+	for f in sorted(factors, key=lambda x: x.get('priority', 0), reverse=True):
+		print(f)
+		ftype = f.get('type')
+		if ftype == 'token:software:totp':
+			r = okta_mfa_totp(conf, s, f, state_token)
+		elif ftype == 'sms':
+			r = okta_mfa_sms(conf, s, f, state_token)
+		else:
+			r = None
+		if r is not None:
+			return r
+	err('no factors processed')
 
-def okta_mfa_totp(conf, s, factors, state_token):
-	for factor in factors:
-		provider = factor.get('provider', '')
-		secret = conf.get('totp.{0}'.format(provider))
-		if secret is None:
-			order = 2
-		elif len(secret) == 0:
-			order = 1
-		else:
-			order = 0
-		factor['order'] = order
-	for factor in sorted(factors, key=lambda x: x.get('order', 0)):
-		provider = factor.get('provider', '')
-		secret = conf.get('totp.{0}'.format(provider), '') or ''
-		code = None
-		if len(secret) == 0:
-			code = input('{0} TOTP: '.format(provider)).strip()
-		else:
-			import pyotp
-			totp = pyotp.TOTP(secret)
-			code = totp.now()
-		code = code or ''
-		if len(code) == 0:
-			continue
-		data = {
-			'factorId': factor.get('id'),
-			'stateToken': state_token,
-			'passCode': code
-		}
-		log('mfa {0} totp request'.format(provider))
-		r = s.post(factor.get('url'), headers=hdr_json(), data=json.dumps(data))
-		if r.status_code != 200:
-			err('okta mfa request failed. {0}'.format(reprr(r)))
-		dbg(conf.get('debug'), 'mfa.response', r.status_code, r.text)
-		j = parse_rjson(r)
-		return j.get('sessionToken', '').strip()
-	err('no totp was processed')
+def okta_mfa_totp(conf, s, factor, state_token):
+	provider = factor.get('provider', '')
+	secret = conf.get('totp.{0}'.format(provider), '') or ''
+	code = None
+	if len(secret) == 0:
+		code = input('{0} TOTP: '.format(provider)).strip()
+	else:
+		import pyotp
+		totp = pyotp.TOTP(secret)
+		code = totp.now()
+	code = code or ''
+	if len(code) == 0:
+		return None
+	data = {
+		'factorId': factor.get('id'),
+		'stateToken': state_token,
+		'passCode': code
+	}
+	log('mfa {0} totp request'.format(provider))
+	r = s.post(factor.get('url'), headers=hdr_json(), data=json.dumps(data))
+	if r.status_code != 200:
+		err('okta mfa request failed. {0}'.format(reprr(r)))
+	dbg(conf.get('debug'), 'mfa.response', r.status_code, r.text)
+	j = parse_rjson(r)
+	return j.get('sessionToken', '').strip()
+
+def okta_mfa_sms(conf, s, factor, state_token):
+	return None
 
 def okta_redirect(conf, s, session_token, redirect_url):
 	data = {
