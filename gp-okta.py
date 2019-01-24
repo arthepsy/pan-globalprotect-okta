@@ -183,7 +183,8 @@ def send_req(conf, s, name, url, data, **kwargs):
 		r = s.get(url, headers=headers)
 	else:
 		r = s.post(url, data=data, headers=headers)
-	rr = 'status code: {0}, text:\n{1}'.format(r.status_code, r.text)
+	hdump = '\n'.join([k + ': ' + v for k, v in sorted(r.headers.items())])
+	rr = 'status: {0}\n\n{1}\n\n{2}'.format(r.status_code, hdump, r.text)
 	if r.status_code != 200:
 		err('okta {0} request failed. {0}'.format(rr))
 	dbg(conf.get('debug'), '{0}.response'.format(name), rr)
