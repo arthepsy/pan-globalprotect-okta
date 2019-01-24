@@ -81,7 +81,7 @@ def parse_rjson(r):
 def parse_form(html, current_url = None):
 	xform = html.find('.//form')
 	url = xform.attrib.get('action', '').strip()
-	if not url.startswith('http'):
+	if not url.startswith('http') and current_url:
 		url = urljoin(current_url, url)
 	data = {}
 	for xinput in html.findall('.//input'):
@@ -319,29 +319,38 @@ def okta_mfa_sms(conf, s, factor, state_token):
 	return j.get('sessionToken', '').strip()
 
 def okta_redirect(conf, s, session_token, redirect_url):
-	data = {
-		'checkAccountSetupComplete': 'true',
-		'report': 'true',
-		'token': session_token,
-		'redirectUrl': redirect_url
-	}
-	url = '{0}/login/sessionCookieRedirect'.format(conf.get('okta_url'))
-	log('okta redirect request')
-	h, c = send_req(conf, s, 'redirect', url, data)
-	xhtml = parse_html(c)
-	
-	url, data = parse_form(xhtml)
-	log('okta redirect form request')
-	h, c = send_req(conf, s, 'redirect form', url, data)
-	saml_username = h.get('saml-username', '').strip()
-	if len(saml_username) == 0:
-		err('saml-username empty')
-	saml_auth_status = h.get('saml-auth-status', '').strip()
-	saml_slo = h.get('saml-slo', '').strip()
-	prelogin_cookie = h.get('prelogin-cookie', '').strip()
-	if len(prelogin_cookie) == 0:
-		err('prelogin-cookie empty')
-	return saml_username, prelogin_cookie
+	rc = 0
+	form_url, form_data = None, {}
+	while True:
+		if rc > 10:
+			err('redirect rabbit hole is too deep...')
+		rc += 1
+		if redirect_url:
+			data = {
+				'checkAccountSetupComplete': 'true',
+				'report': 'true',
+				'token': session_token,
+				'redirectUrl': redirect_url
+			}
+			url = '{0}/login/sessionCookieRedirect'.format(conf.get('okta_url'))
+			log('okta redirect request')
+			h, c = send_req(conf, s, 'redirect', url, data)
+			redirect_url = get_redirect_url(conf, c, url)
+			if redirect_url:
+				form_url, form_data = None, {}
+			else:
+				xhtml = parse_html(c)
+				form_url, form_data = parse_form(xhtml, url)
+		elif form_url:
+			log('okta redirect form request')
+			h, c = send_req(conf, s, 'redirect form', form_url, form_data)
+		saml_username = h.get('saml-username', '').strip()
+		prelogin_cookie = h.get('prelogin-cookie', '').strip()
+		if saml_username and prelogin_cookie:
+			saml_auth_status = h.get('saml-auth-status', '').strip()
+			saml_slo = h.get('saml-slo', '').strip()
+			dbg(conf.get('debug'), 'saml prop', [saml_auth_status, saml_slo])
+			return saml_username, prelogin_cookie
 
 def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 	log('getconfig request')
