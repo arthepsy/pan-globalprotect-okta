@@ -55,9 +55,6 @@ def err(s):
 	print('err: {0}'.format(s))
 	sys.exit(1)
 
-def reprr(r):
-	return 'status code: {0}, text:\n{1}'.format(r.status_code, r.text)
-
 def parse_xml(xml):
 	try:
 		xml = bytes(bytearray(xml, encoding='utf-8'))
@@ -78,9 +75,6 @@ def parse_rjson(r):
 		return r.json()
 	except:
 		err('failed to parse json')
-
-def hdr_json():
-	return {'Accept':'application/json', 'Content-Type': 'application/json'}
 
 def parse_form(html):
 	xform = html.find('.//form')
@@ -155,13 +149,50 @@ def mfa_priority(conf, ftype, fprovider):
 		priority += (512 - line_nr)
 	return priority
 
+
+def get_redirect_url(conf, c):
+	rx_base_url = re.search(r'var\s*baseUrl\s*=\s*\'([^\']+)\'', c)
+	rx_from_uri = re.search(r'var\s*fromUri\s*=\s*\'([^\']+)\'', c)
+	if not rx_from_uri:
+		dbg(conf.get('debug'), 'not found', 'formUri')
+		return None
+	from_uri = to_b(rx_from_uri.group(1)).decode('unicode_escape').strip()
+	if from_uri.startswith('http'):
+		return from_uri
+	if not rx_base_url:
+		dbg(conf.get('debug'), 'not found', 'baseUri')
+		# TODO: add current url's base
+		return from_uri
+	base_url = to_b(rx_base_url.group(1)).decode('unicode_escape').strip()
+	return base_url + from_uri
+
+def send_req(conf, s, name, url, data, **kwargs):
+	dbg(conf.get('debug'), '{0}.request'.format(name), url)
+	do_json = True if kwargs.get('json') else False
+	headers = {}
+	if do_json:
+		data = json.dumps(data)
+		headers['Accept'] = 'application/json'
+		headers['Content-Type'] = 'application/json'
+	if kwargs.get('get'):
+		r = s.get(url, headers=headers)
+	else:
+		r = s.post(url, data=data, headers=headers)
+	rr = 'status code: {0}, text:\n{1}'.format(r.status_code, r.text)
+	if r.status_code != 200:
+		err('okta {0} request failed. {0}'.format(rr))
+	dbg(conf.get('debug'), '{0}.response'.format(name), rr)
+	if do_json:
+		return r.headers, parse_rjson(r)
+	else:
+		return r.headers, r.text
+
+
 def paloalto_prelogin(conf, s):
 	log('prelogin request')
-	r = s.get('{0}/global-protect/prelogin.esp'.format(conf.get('vpn_url')))
-	if r.status_code != 200:
-		err('prelogin request failed. {0}'.format(reprr(r)))
-	dbg(conf.get('debug'), 'prelogin.response', reprr(r))
-	x = parse_xml(r.text)
+	url = '{0}/global-protect/prelogin.esp'.format(conf.get('vpn_url'))
+	h, c = send_req(conf, s, 'prelogin', url, {}, get=True)
+	x = parse_xml(c)
 	saml_req = x.find('.//saml-request')
 	if saml_req is None:
 		err('did not find saml request')
@@ -178,23 +209,10 @@ def paloalto_prelogin(conf, s):
 def okta_saml(conf, s, saml_xml):
 	log('okta saml request')
 	url, data = parse_form(saml_xml)
-	r = s.post(url, data=data)
-	if r.status_code != 200:
-		err('okta saml request failed. {0}'.format(reprr(r)))
-	dbg(conf.get('debug'), 'saml.response', reprr(r))
-	c = r.text
-	rx_base_url = re.search(r'var\s*baseUrl\s*=\s*\'([^\']+)\'', c)
-	rx_from_uri = re.search(r'var\s*fromUri\s*=\s*\'([^\']+)\'', c)
-	if rx_base_url is None:
-		err('did not find baseUrl in response')
-	if rx_from_uri is None:
-		err('did not find fromUri in response')
-	base_url = to_b(rx_base_url.group(1)).decode('unicode_escape').strip()
-	from_uri = to_b(rx_from_uri.group(1)).decode('unicode_escape').strip()
-	if from_uri.startswith('http'):
-		redirect_url = from_uri
-	else:
-		redirect_url = base_url + from_uri
+	h, c = send_req(conf, s, 'saml', url, data)
+	redirect_url = get_redirect_url(conf, c)
+	if redirect_url is None:
+		err('did not find redirect url')
 	return redirect_url
 
 def okta_auth(conf, s):
@@ -208,11 +226,7 @@ def okta_auth(conf, s):
 			'multiOptionalFactorEnroll':True
 		}
 	}
-	r = s.post(url, headers=hdr_json(), data=json.dumps(data))
-	if r.status_code != 200:
-		err('okta auth request failed. {0}'.format(reprr(r)))
-	dbg(conf.get('debug'), 'auth.response', reprr(r))
-	j = parse_rjson(r)
+	h, j = send_req(conf, s, 'auth', url, data, json=True)
 	status = j.get('status', '').strip()
 	dbg(conf.get('debug'), 'status', status)
 	if status.lower() == 'success':
@@ -282,11 +296,7 @@ def okta_mfa_totp(conf, s, factor, state_token):
 		'passCode': code
 	}
 	log('mfa {0} totp request'.format(provider))
-	r = s.post(factor.get('url'), headers=hdr_json(), data=json.dumps(data))
-	if r.status_code != 200:
-		err('okta mfa request failed. {0}'.format(reprr(r)))
-	dbg(conf.get('debug'), 'mfa.response', r.status_code, r.text)
-	j = parse_rjson(r)
+	h, j = send_req(conf, s, 'totp mfa', factor.get('url'), data, json=True)
 	return j.get('sessionToken', '').strip()
 
 def okta_mfa_sms(conf, s, factor, state_token):
@@ -296,19 +306,12 @@ def okta_mfa_sms(conf, s, factor, state_token):
 		'stateToken': state_token,
 	}
 	log('mfa {0} sms request'.format(provider))
-	r = s.post(factor.get('url'), headers=hdr_json(), data=json.dumps(data))
-	if r.status_code != 200:
-		err('okta mfa request failed. {0}'.format(reprr(r)))
-	dbg(conf.get('debug'), 'mfa.response', r.status_code, r.text)
+	h, j = send_req(conf, s, 'sms mfa', factor.get('url'), data, json=True)
 	code = input('{0} SMS verification code: '.format(provider)).strip()
 	if len(code) == 0:
 		return None
 	data['passCode'] = code
-	r = s.post(factor.get('url'), headers=hdr_json(), data=json.dumps(data))
-	if r.status_code != 200:
-		err('okta mfa request failed. {0}'.format(reprr(r)))
-	dbg(conf.get('debug'), 'mfa.response', r.status_code, r.text)
-	j = parse_rjson(r)
+	h, j = send_req(conf, s, 'sms mfa', factor.get('url'), data, json=True)
 	return j.get('sessionToken', '').strip()
 
 def okta_redirect(conf, s, session_token, redirect_url):
@@ -320,24 +323,18 @@ def okta_redirect(conf, s, session_token, redirect_url):
 	}
 	url = '{0}/login/sessionCookieRedirect'.format(conf.get('okta_url'))
 	log('okta redirect request')
-	r = s.post(url, data=data)
-	if r.status_code != 200:
-		err('redirect request failed. {0}'.format(reprr(r)))
-	dbg(conf.get('debug'), 'redirect.response', r.status_code, r.text)
-	xhtml = parse_html(r.text)
+	h, c = send_req(conf, s, 'redirect', url, data)
+	xhtml = parse_html(c)
 	
 	url, data = parse_form(xhtml)
 	log('okta redirect form request')
-	r = s.post(url, data=data)
-	if r.status_code != 200:
-		err('redirect form request failed. {0}'.format(reprr(r)))
-	dbg(conf.get('debug'), 'form.response', r.status_code, r.text)
-	saml_username = r.headers.get('saml-username', '').strip()
+	h, c = send_req(conf, s, 'redirect form', url, data)
+	saml_username = h.get('saml-username', '').strip()
 	if len(saml_username) == 0:
 		err('saml-username empty')
-	saml_auth_status = r.headers.get('saml-auth-status', '').strip()
-	saml_slo = r.headers.get('saml-slo', '').strip()
-	prelogin_cookie = r.headers.get('prelogin-cookie', '').strip()
+	saml_auth_status = h.get('saml-auth-status', '').strip()
+	saml_slo = h.get('saml-slo', '').strip()
+	prelogin_cookie = h.get('prelogin-cookie', '').strip()
 	if len(prelogin_cookie) == 0:
 		err('prelogin-cookie empty')
 	return saml_username, prelogin_cookie
@@ -358,11 +355,8 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 		'prelogin-cookie': prelogin_cookie,
 		'ipv6-support': 'yes'
 	}
-	r = s.post(url, data=data)
-	if r.status_code != 200:
-		err('getconfig request failed. {0}'.format(reprr(r)))
-	dbg(conf.get('debug'), 'getconfig.response', reprr(r))
-	x = parse_xml(r.text)
+	h, c = send_req(conf, s, 'getconfig', url, data)
+	x = parse_xml(c)
 	xtmp = x.find('.//portal-userauthcookie')
 	if xtmp is None:
 		err('did not find portal-userauthcookie')
