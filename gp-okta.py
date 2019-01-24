@@ -96,13 +96,13 @@ def load_conf(cf):
 		for rline in fp:
 			line_nr += 1
 			line = rline.strip()
-			mx = re.match('^\s*([^=\s]+)\s*=\s*(.*?)\s*(?:#\s+.*)?\s*$', line)
+			mx = re.match(r'^\s*([^=\s]+)\s*=\s*(.*?)\s*(?:#\s+.*)?\s*$', line)
 			if mx:
 				k, v = mx.group(1).lower(), mx.group(2)
 				if k.startswith('#'):
 					continue
 				for q in '"\'':
-					if re.match('^{0}.*{0}$'.format(q), v):
+					if re.match(r'^{0}.*{0}$'.format(q), v):
 						v = v[1:-1]
 				conf[k] = v
 				conf['{0}.line'.format(k)] = line_nr
@@ -184,8 +184,7 @@ def send_req(conf, s, name, url, data, **kwargs):
 	dbg(conf.get('debug'), '{0}.response'.format(name), rr)
 	if do_json:
 		return r.headers, parse_rjson(r)
-	else:
-		return r.headers, r.text
+	return r.headers, r.text
 
 
 def paloalto_prelogin(conf, s):
@@ -219,8 +218,8 @@ def okta_auth(conf, s):
 	log('okta auth request')
 	url = '{0}/api/v1/authn'.format(conf.get('okta_url'))
 	data = {
-		'username': conf.get('username'), 
-		'password': conf.get('password'), 
+		'username': conf.get('username'),
+		'password': conf.get('password'),
 		'options': {
 			'warnBeforePasswordExpired':True,
 			'multiOptionalFactorEnroll':True
@@ -343,7 +342,7 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 	log('getconfig request')
 	url = '{0}/global-protect/getconfig.esp'.format(conf.get('vpn_url'))
 	data = {
-		'user': saml_username, 
+		'user': saml_username,
 		'passwd': '',
 		'inputStr': '',
 		'clientVer': '4100',
