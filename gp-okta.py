@@ -29,9 +29,11 @@ from lxml import etree
 import requests
 
 if sys.version_info >= (3,):
+	from urllib.parse import urljoin
 	text_type = str
 	binary_type = bytes
 else:
+	from urlparse import urljoin
 	text_type = unicode
 	binary_type = str
 	input = raw_input
@@ -76,9 +78,11 @@ def parse_rjson(r):
 	except:
 		err('failed to parse json')
 
-def parse_form(html):
+def parse_form(html, current_url = None):
 	xform = html.find('.//form')
 	url = xform.attrib.get('action', '').strip()
+	if not url.startswith('http'):
+		url = urljoin(current_url, url)
 	data = {}
 	for xinput in html.findall('.//input'):
 		k = xinput.attrib.get('name', '').strip()
@@ -150,7 +154,7 @@ def mfa_priority(conf, ftype, fprovider):
 	return priority
 
 
-def get_redirect_url(conf, c):
+def get_redirect_url(conf, c, current_url = None):
 	rx_base_url = re.search(r'var\s*baseUrl\s*=\s*\'([^\']+)\'', c)
 	rx_from_uri = re.search(r'var\s*fromUri\s*=\s*\'([^\']+)\'', c)
 	if not rx_from_uri:
@@ -161,7 +165,8 @@ def get_redirect_url(conf, c):
 		return from_uri
 	if not rx_base_url:
 		dbg(conf.get('debug'), 'not found', 'baseUri')
-		# TODO: add current url's base
+		if current_url:
+			return urljoin(current_url, from_uri)
 		return from_uri
 	base_url = to_b(rx_base_url.group(1)).decode('unicode_escape').strip()
 	return base_url + from_uri
@@ -209,7 +214,7 @@ def okta_saml(conf, s, saml_xml):
 	log('okta saml request')
 	url, data = parse_form(saml_xml)
 	h, c = send_req(conf, s, 'saml', url, data)
-	redirect_url = get_redirect_url(conf, c)
+	redirect_url = get_redirect_url(conf, c, url)
 	if redirect_url is None:
 		err('did not find redirect url')
 	return redirect_url
