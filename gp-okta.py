@@ -27,6 +27,7 @@ from __future__ import print_function
 import io, os, sys, re, json, base64, getpass, subprocess, shlex, signal
 from lxml import etree
 import requests
+import time
 
 if sys.version_info >= (3,):
 	from urllib.parse import urljoin
@@ -308,6 +309,8 @@ def okta_mfa(conf, s, j):
 			r = okta_mfa_totp(conf, s, f, state_token)
 		elif ftype == 'sms':
 			r = okta_mfa_sms(conf, s, f, state_token)
+		elif ftype == 'push':
+			r = okta_mfa_push(conf, s, f, state_token)
 		else:
 			r = None
 		if r is not None:
@@ -350,6 +353,21 @@ def okta_mfa_sms(conf, s, factor, state_token):
 	data['passCode'] = code
 	h, j = send_req(conf, s, 'sms mfa', factor.get('url'), data, json=True)
 	return j
+
+def okta_mfa_push(conf, s, factor, state_token):
+	provider = factor.get('provider', '')
+	data = {
+		'factorId': factor.get('id'),
+		'stateToken': state_token,
+	}
+	log('mfa {0} push request'.format(provider))
+	status = 'MFA_CHALLENGE'
+	while status == 'MFA_CHALLENGE':
+		time.sleep(3.33)
+		h, j = send_req(conf, s, 'push mfa', factor.get('url'), data, json=True)
+		status = j.get('status', '').strip()
+		dbg(conf.get('debug'), 'status', status)
+	return j.get('sessionToken', '').strip()
 
 def okta_redirect(conf, s, session_token, redirect_url):
 	rc = 0
