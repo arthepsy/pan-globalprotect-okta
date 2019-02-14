@@ -232,18 +232,50 @@ def okta_auth(conf, s):
 		}
 	}
 	h, j = send_req(conf, s, 'auth', url, data, json=True)
-	status = j.get('status', '').strip()
+
+	while True:
+		ok, r = okta_transaction_state(conf, s, j)
+		if ok == True:
+			return r
+		j = r
+
+def okta_transaction_state(conf, s, j):
+	# https://developer.okta.com/docs/api/resources/authn#transaction-state
+	status = j.get('status', '').strip().lower()
 	dbg(conf.get('debug'), 'status', status)
-	if status.lower() == 'success':
+	# status: unauthenticated
+	# status: password_warn
+	if status == 'password_warn':
+		log('password expiration warning')
+		url = j.get('_links', {}).get('skip', {}).get('href', '').strip()
+		if len(url) == 0:
+			err('skip url not found')
+		state_token = j.get('stateToken', '').strip()
+		if len(state_token) == 0:
+			err('empty state token')
+		data = {'stateToken': state_token}
+		h, j = send_req(conf, s, 'skip', url, data, json=True)
+		return False, j
+	# status: password_expired
+	# status: recovery
+	# status: recovery_challenge
+	# status: password_reset
+	# status: locked_out
+	# status: mfa_enroll
+	# status: mfa_enroll_activate
+	# status: mfa_required
+	if status == 'mfa_required':
+		j = okta_mfa(conf, s, j)
+		return False, j
+	# status: mfa_challenge
+	# status: success
+	if status == 'success':
 		session_token = j.get('sessionToken', '').strip()
-	elif status.lower() == 'mfa_required':
-		session_token = okta_mfa(conf, s, j)
-	else:
-		print(j)
-		err('unknown status')
-	if len(session_token) == 0:
-		err('empty session token')
-	return session_token
+		if len(session_token) == 0:
+			err('empty session token')
+		return True, session_token
+	print(j)
+	err('unknown status: {0}'.format(status))
 
 def okta_mfa(conf, s, j):
 	state_token = j.get('stateToken', '').strip()
@@ -302,7 +334,7 @@ def okta_mfa_totp(conf, s, factor, state_token):
 	}
 	log('mfa {0} totp request'.format(provider))
 	h, j = send_req(conf, s, 'totp mfa', factor.get('url'), data, json=True)
-	return j.get('sessionToken', '').strip()
+	return j
 
 def okta_mfa_sms(conf, s, factor, state_token):
 	provider = factor.get('provider', '')
@@ -317,7 +349,7 @@ def okta_mfa_sms(conf, s, factor, state_token):
 		return None
 	data['passCode'] = code
 	h, j = send_req(conf, s, 'sms mfa', factor.get('url'), data, json=True)
-	return j.get('sessionToken', '').strip()
+	return j
 
 def okta_redirect(conf, s, session_token, redirect_url):
 	rc = 0
