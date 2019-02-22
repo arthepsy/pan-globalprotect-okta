@@ -363,10 +363,11 @@ def okta_mfa_push(conf, s, factor, state_token):
 	log('mfa {0} push request'.format(provider))
 	status = 'MFA_CHALLENGE'
 	while status == 'MFA_CHALLENGE':
-		time.sleep(3.33)
 		h, j = send_req(conf, s, 'push mfa', factor.get('url'), data, json=True)
 		status = j.get('status', '').strip()
 		dbg(conf.get('debug'), 'status', status)
+		if status == 'MFA_CHALLENGE':
+			time.sleep(3.33)
 	return j
 
 def okta_redirect(conf, s, session_token, redirect_url):
