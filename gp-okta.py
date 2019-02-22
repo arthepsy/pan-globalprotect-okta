@@ -367,7 +367,7 @@ def okta_mfa_push(conf, s, factor, state_token):
 		h, j = send_req(conf, s, 'push mfa', factor.get('url'), data, json=True)
 		status = j.get('status', '').strip()
 		dbg(conf.get('debug'), 'status', status)
-	return j.get('sessionToken', '').strip()
+	return j
 
 def okta_redirect(conf, s, session_token, redirect_url):
 	rc = 0
