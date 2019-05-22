@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 
-conf_username=`grep username gp-okta.conf | awk -F \= '{print $2}' | tr -d " "`
-conf_password=`grep password gp-okta.conf | awk -F \= '{print $2}' | tr -d " "`
-totp_okta=`grep totp.okta gp-okta.conf | awk -F \= '{print $2}' | tr -d " "`
-totp_google=`grep totp.google gp-okta.conf | awk -F \= '{print $2}' | tr -d " "`
+basedir=$(dirname $0)
+conf_username=`grep username "${basedir}/gp-okta.conf" | awk -F \= '{print $2}' | tr -d " "`
+conf_password=`grep password "${basedir}/gp-okta.conf" | awk -F \= '{print $2}' | tr -d " "`
+totp_okta=`grep totp.okta "${basedir}/gp-okta.conf" | awk -F \= '{print $2}' | tr -d " "`
+totp_google=`grep totp.google "${basedir}/gp-okta.conf" | awk -F \= '{print $2}' | tr -d " "`
 
 haystack="okta google"
 
@@ -60,5 +61,5 @@ docker run \
     -e GP_PASSWORD=${GP_PASSWORD} \
     -e GP_USERNAME=${GP_USERNAME} \
     -v /etc/resolv.conf:/etc/resolv.conf \
-    -v ${PWD}:/openconnect/gp-okta \
+    -v ${basedir}:/openconnect/gp-okta \
     gp-okta
