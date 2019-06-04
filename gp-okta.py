@@ -446,6 +446,9 @@ def main():
 	conf = load_conf(sys.argv[1])
 	
 	s = requests.Session()
+        if conf.get('cert'):
+                s.cert = conf.get('cert')
+        
 	s.headers['User-Agent'] = 'PAN GlobalProtect'
 	saml_xml = paloalto_prelogin(conf, s)
 	redirect_url = okta_saml(conf, s, saml_xml)
