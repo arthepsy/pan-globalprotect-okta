@@ -154,7 +154,7 @@ def mfa_priority(conf, ftype, fprovider):
 	return priority
 
 def get_state_token(conf, c, current_url = None):
-        rx_state_token = re.search(r'var\s*stateToken\s*=\s*\'([^\']+)\'', c)
+	rx_state_token = re.search(r'var\s*stateToken\s*=\s*\'([^\']+)\'', c)
 	if not rx_state_token:
 		dbg(conf.get('debug'), 'not found', 'stateToken')
 		return None
@@ -380,15 +380,15 @@ def okta_redirect(conf, s, session_token, redirect_url):
 			url = '{0}/login/sessionCookieRedirect'.format(conf.get('okta_url'))
 			log('okta redirect request')
 			h, c = send_req(conf, s, 'redirect', url, data)
-                        state_token = get_state_token(conf, c, url)
+			state_token = get_state_token(conf, c, url)
 			redirect_url = get_redirect_url(conf, c, url)
 			if redirect_url:
 				form_url, form_data = None, {}
 			else:
 				xhtml = parse_html(c)
 				form_url, form_data = parse_form(xhtml, url)
-                        if state_token is not None:
-                                okta_auth(conf, s, state_token)
+				if state_token is not None:
+					okta_auth(conf, s, state_token)
 		elif form_url:
 			log('okta redirect form request')
 			h, c = send_req(conf, s, 'redirect form', form_url, form_data)
@@ -459,8 +459,8 @@ def main():
 	conf = load_conf(sys.argv[1])
 	
 	s = requests.Session()
-        if conf.get('cert'):
-                s.cert = conf.get('cert')
+	if conf.get('cert'):
+		s.cert = conf.get('cert')
         
 	s.headers['User-Agent'] = 'PAN GlobalProtect'
 	saml_xml = paloalto_prelogin(conf, s)
