@@ -490,6 +490,8 @@ def main():
 	cmd = conf.get('openconnect_cmd') or 'openconnect'
 	cmd += ' --protocol=gp -u \'{0}\''
 	cmd += ' --usergroup {1}'
+	if conf.get('cert'):
+		cmd += ' --certificate=\'{0}\''.format(conf.get('cert'))
 	cmd += ' --passwd-on-stdin ' + conf.get('openconnect_args', '') + ' \'{2}\''
 	cmd = cmd.format(username, cookie_type, conf.get('vpn_url'))
 	gw = (conf.get('gateway') or '').strip()
