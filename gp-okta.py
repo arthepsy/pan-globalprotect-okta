@@ -27,12 +27,15 @@ from __future__ import print_function
 import io, os, sys, re, json, base64, getpass, subprocess, shlex, signal
 from lxml import etree
 import requests
+import tempfile
 
 if sys.version_info >= (3,):
+	from urllib.parse import urlparse
 	from urllib.parse import urljoin
 	text_type = str
 	binary_type = bytes
 else:
+	from urlparse import urlparse
 	from urlparse import urljoin
 	text_type = unicode
 	binary_type = str
@@ -93,6 +96,7 @@ def parse_form(html, current_url = None):
 
 
 def load_conf(cf):
+	log('load conf')
 	conf = {}
 	keys = ['vpn_url', 'username', 'password', 'okta_url']
 	line_nr = 0
@@ -121,6 +125,22 @@ def load_conf(cf):
 		conf['username'] = input('username: ').strip()
 	if len(conf.get('password', '').strip()) == 0:
 		conf['password'] = getpass.getpass('password: ').strip()
+	if len(conf.get('openconnect_certs', '').strip()) == 0:
+		conf['openconnect_certs'] = tempfile.NamedTemporaryFile()
+		log('will collect openconnect_certs in temporary file: {0} and verify against them'.format(conf['openconnect_certs'].name))
+	else:
+		conf['openconnect_certs'] = open(conf['openconnect_certs'], 'wb')
+	if len(conf.get('vpn_url_cert', '').strip()) != 0:
+		if not os.path.exists(conf.get('vpn_url_cert')):
+			err('configured vpn_url_cert file does not exist')
+		conf['openconnect_certs'].write(open(conf.get('vpn_url_cert'), 'rb').read()) # copy it
+	if len(conf.get('okta_url_cert', '').strip()) != 0:
+		if not os.path.exists(conf.get('okta_url_cert')):
+			err('configured okta_url_cert file does not exist')
+		conf['openconnect_certs'].write(open(conf.get('okta_url_cert'), 'rb').read()) # copy it
+	if len(conf.get('client_cert', '').strip()) != 0:
+		if not os.path.exists(conf.get('client_cert')):
+				err('configured client_cert file does not exist')
 	for k in keys:
 		if k not in conf:
 			err('missing configuration key: {0}'.format(k))
@@ -180,6 +200,13 @@ def get_redirect_url(conf, c, current_url = None):
 
 def send_req(conf, s, name, url, data, **kwargs):
 	dbg(conf.get('debug'), '{0}.request'.format(name), url)
+	if kwargs.get('expected_url'):
+		purl = list(urlparse(url))
+		purl = (purl[0], purl[1].split(':')[0])
+		pexp = list(urlparse(kwargs.get('expected_url')))
+		pexp = (pexp[0], pexp[1].split(':')[0])
+		if purl != pexp: 
+			err('{0}: unexpected url found {1} != {2}'.format(name, purl, pexp))
 	do_json = True if kwargs.get('json') else False
 	headers = {}
 	if do_json:
@@ -187,9 +214,11 @@ def send_req(conf, s, name, url, data, **kwargs):
 		headers['Accept'] = 'application/json'
 		headers['Content-Type'] = 'application/json'
 	if kwargs.get('get'):
-		r = s.get(url, headers=headers)
+		r = s.get(url, headers=headers,
+			verify=kwargs.get('verify', True))
 	else:
-		r = s.post(url, data=data, headers=headers)
+		r = s.post(url, data=data, headers=headers,
+			verify=kwargs.get('verify', True))
 	hdump = '\n'.join([k + ': ' + v for k, v in sorted(r.headers.items())])
 	rr = 'status: {0}\n\n{1}\n\n{2}'.format(r.status_code, hdump, r.text)
 	if r.status_code != 200:
@@ -201,16 +230,19 @@ def send_req(conf, s, name, url, data, **kwargs):
 
 
 def paloalto_prelogin(conf, s, again=False):
-	log('prelogin request')
+	log('prelogin request [vpn_url]')
 	if again:
 		url = '{0}/ssl-vpn/prelogin.esp'.format(conf.get('vpn_url'))
 	else:
 		url = '{0}/global-protect/prelogin.esp'.format(conf.get('vpn_url'))
-	h, c = send_req(conf, s, 'prelogin', url, {}, get=True)
+	h, c = send_req(conf, s, 'prelogin', url, {}, get=True,
+		verify=conf.get('vpn_url_cert'))
 	x = parse_xml(c)
 	saml_req = x.find('.//saml-request')
 	if saml_req is None:
-		err('did not find saml request')
+		msg = x.find('.//msg')
+		msg = msg.text.strip() if msg is not None else 'Probably you need a certificate?'
+		err('did not find saml request. {0}'.format(msg))
 	if len(saml_req.text.strip()) == 0:
 		err('empty saml request')
 	try:
@@ -222,16 +254,17 @@ def paloalto_prelogin(conf, s, again=False):
 	return saml_xml
 
 def okta_saml(conf, s, saml_xml):
-	log('okta saml request')
+	log('okta saml request [okta_url]')
 	url, data = parse_form(saml_xml)
-	h, c = send_req(conf, s, 'saml', url, data)
+	h, c = send_req(conf, s, 'saml', url, data,
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	redirect_url = get_redirect_url(conf, c, url)
 	if redirect_url is None:
 		err('did not find redirect url')
 	return redirect_url
 
 def okta_auth(conf, s, stateToken = None):
-	log('okta auth request')
+	log('okta auth request [okta_url]')
 	url = '{0}/api/v1/authn'.format(conf.get('okta_url'))
 	data = {
 		'username': conf.get('username'),
@@ -243,7 +276,8 @@ def okta_auth(conf, s, stateToken = None):
 	} if stateToken is None else {
 		'stateToken': stateToken
 	}
-	h, j = send_req(conf, s, 'auth', url, data, json=True)
+	h, j = send_req(conf, s, 'auth', url, data, json=True,
+		verify=conf.get('okta_url_cert'))
 
 	while True:
 		ok, r = okta_transaction_state(conf, s, j)
@@ -266,7 +300,8 @@ def okta_transaction_state(conf, s, j):
 		if len(state_token) == 0:
 			err('empty state token')
 		data = {'stateToken': state_token}
-		h, j = send_req(conf, s, 'skip', url, data, json=True)
+		h, j = send_req(conf, s, 'skip', url, data, json=True,
+			expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 		return False, j
 	# status: password_expired
 	# status: recovery
@@ -314,7 +349,7 @@ def okta_mfa(conf, s, j):
 	if len(factors) == 0:
 		err('no factors found')
 	for f in sorted(factors, key=lambda x: x.get('priority', 0), reverse=True):
-		print(f)
+		#print(f)
 		ftype = f.get('type')
 		if ftype == 'token:software:totp':
 			r = okta_mfa_totp(conf, s, f, state_token)
@@ -333,7 +368,10 @@ def okta_mfa_totp(conf, s, factor, state_token):
 	if len(secret) == 0:
 		code = input('{0} TOTP: '.format(provider)).strip()
 	else:
-		import pyotp
+		try:
+			import pyotp
+		except ImportError:
+			err('Need pyotp package, consider doing \'pip install pyotp\' (or similar)')
 		totp = pyotp.TOTP(secret)
 		code = totp.now()
 	code = code or ''
@@ -344,8 +382,9 @@ def okta_mfa_totp(conf, s, factor, state_token):
 		'stateToken': state_token,
 		'passCode': code
 	}
-	log('mfa {0} totp request'.format(provider))
-	h, j = send_req(conf, s, 'totp mfa', factor.get('url'), data, json=True)
+	log('mfa {0} totp request: {1} [okta_url]'.format(provider, code))
+	h, j = send_req(conf, s, 'totp mfa', factor.get('url'), data, json=True,
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	return j
 
 def okta_mfa_sms(conf, s, factor, state_token):
@@ -354,13 +393,16 @@ def okta_mfa_sms(conf, s, factor, state_token):
 		'factorId': factor.get('id'),
 		'stateToken': state_token,
 	}
-	log('mfa {0} sms request'.format(provider))
-	h, j = send_req(conf, s, 'sms mfa', factor.get('url'), data, json=True)
+	log('mfa {0} sms request [okta_url]'.format(provider))
+	h, j = send_req(conf, s, 'sms mfa (1)', factor.get('url'), data, json=True,
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	code = input('{0} SMS verification code: '.format(provider)).strip()
 	if len(code) == 0:
 		return None
 	data['passCode'] = code
-	h, j = send_req(conf, s, 'sms mfa', factor.get('url'), data, json=True)
+	log('mfa {0} sms request [okta_url]'.format(provider))
+	h, j = send_req(conf, s, 'sms mfa (2)', factor.get('url'), data, json=True,
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	return j
 
 def okta_redirect(conf, s, session_token, redirect_url):
@@ -378,8 +420,9 @@ def okta_redirect(conf, s, session_token, redirect_url):
 				'redirectUrl': redirect_url
 			}
 			url = '{0}/login/sessionCookieRedirect'.format(conf.get('okta_url'))
-			log('okta redirect request')
-			h, c = send_req(conf, s, 'redirect', url, data)
+			log('okta redirect request {0} [okta_url]'.format(rc))
+			h, c = send_req(conf, s, 'redirect', url, data,
+				verify=conf.get('okta_url_cert'))
 			state_token = get_state_token(conf, c, url)
 			redirect_url = get_redirect_url(conf, c, url)
 			if redirect_url:
@@ -387,11 +430,13 @@ def okta_redirect(conf, s, session_token, redirect_url):
 			else:
 				xhtml = parse_html(c)
 				form_url, form_data = parse_form(xhtml, url)
-				if state_token is not None:
-					okta_auth(conf, s, state_token)
+			if state_token is not None:
+				log('stateToken: {0}'.format(state_token))
+				okta_auth(conf, s, state_token)
 		elif form_url:
-			log('okta redirect form request')
-			h, c = send_req(conf, s, 'redirect form', form_url, form_data)
+			log('okta redirect form request [vpn_url]')
+			h, c = send_req(conf, s, 'redirect form', form_url, form_data,
+				expected_url=conf.get('vpn_url'), verify=conf.get('vpn_url_cert'))
 		saml_username = h.get('saml-username', '').strip()
 		prelogin_cookie = h.get('prelogin-cookie', '').strip()
 		if saml_username and prelogin_cookie:
@@ -401,7 +446,7 @@ def okta_redirect(conf, s, session_token, redirect_url):
 			return saml_username, prelogin_cookie
 
 def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
-	log('getconfig request')
+	log('getconfig request [vpn_url]')
 	url = '{0}/global-protect/getconfig.esp'.format(conf.get('vpn_url'))
 	data = {
 		'user': saml_username,
@@ -416,7 +461,8 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 		'prelogin-cookie': prelogin_cookie,
 		'ipv6-support': 'yes'
 	}
-	h, c = send_req(conf, s, 'getconfig', url, data)
+	h, c = send_req(conf, s, 'getconfig', url, data,
+		verify=conf.get('vpn_url_cert'))
 	x = parse_xml(c)
 	xtmp = x.find('.//portal-userauthcookie')
 	if xtmp is None:
@@ -424,7 +470,12 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 	portal_userauthcookie = xtmp.text
 	if len(portal_userauthcookie) == 0:
 		err('empty portal_userauthcookie')
-	return portal_userauthcookie
+	gateway = x.find('.//gateways//entry').get('name')
+	with open(conf['openconnect_certs'].name, 'ab') as cafile:
+		for entry in x.find('.//root-ca'):
+			cert = entry.find('.//cert').text
+			cafile.write(to_b(cert))
+	return portal_userauthcookie, gateway
 
 # Combined first half of okta_saml with second half of okta_redirect
 def okta_saml_2(conf, s, saml_xml):
@@ -445,8 +496,8 @@ def okta_saml_2(conf, s, saml_xml):
 	saml_username = r.headers.get('saml-username', '').strip()
 	if len(saml_username) == 0 and not again:
 		err('saml-username empty')
-	saml_auth_status = r.headers.get('saml-auth-status', '').strip()
-	saml_slo = r.headers.get('saml-slo', '').strip()
+	#saml_auth_status = r.headers.get('saml-auth-status', '').strip()
+	#saml_slo = r.headers.get('saml-slo', '').strip()
 	prelogin_cookie = r.headers.get('prelogin-cookie', '').strip()
 	if len(prelogin_cookie) == 0:
 		err('prelogin-cookie empty')
@@ -456,20 +507,24 @@ def main():
 	if len(sys.argv) < 2:
 		print('usage: {0} <conf>'.format(sys.argv[0]))
 		sys.exit(1)
+
 	conf = load_conf(sys.argv[1])
 	
 	s = requests.Session()
-	if conf.get('cert'):
-		s.cert = conf.get('cert')
-        
+
+	if conf.get('client_cert'):
+		s.cert = conf.get('client_cert')
+
 	s.headers['User-Agent'] = 'PAN GlobalProtect'
 	saml_xml = paloalto_prelogin(conf, s)
 	redirect_url = okta_saml(conf, s, saml_xml)
 	token = okta_auth(conf, s)
 	log('sessionToken: {0}'.format(token))
 	saml_username, prelogin_cookie = okta_redirect(conf, s, token, redirect_url)
-	userauthcookie = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
+	userauthcookie, gateway = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
+
 	log('portal-userauthcookie: {0}'.format(userauthcookie))
+	log('gateway: {0}'.format(gateway))
 
 	# Another dance?
 	if conf.get('another_dance', '').lower() in ['1', 'true']:
@@ -487,14 +542,16 @@ def main():
 	    cookie = userauthcookie
 	
 	username = saml_username
-	cmd = conf.get('openconnect_cmd') or 'openconnect'
+	cmd = conf.get('openconnect_cmd', 'openconnect')
 	cmd += ' --protocol=gp -u \'{0}\''
 	cmd += ' --usergroup {1}'
-	if conf.get('cert'):
-		cmd += ' --certificate=\'{0}\''.format(conf.get('cert'))
+	if conf.get('client_cert'):
+		cmd += ' --certificate=\'{0}\''.format(conf.get('client_cert'))
+	if conf.get('openconnect_certs') and os.path.getsize(conf.get('openconnect_certs').name) > 0:
+		cmd += ' --cafile=\'{0}\''.format(conf.get('openconnect_certs').name)
 	cmd += ' --passwd-on-stdin ' + conf.get('openconnect_args', '') + ' \'{2}\''
 	cmd = cmd.format(username, cookie_type, conf.get('vpn_url'))
-	gw = (conf.get('gateway') or '').strip()
+	gw = conf.get('gateway', gateway).strip()
 	bugs = ''
 	if conf.get('bug.nl', '').lower() in ['1', 'true']:
 		bugs += '\\n'
