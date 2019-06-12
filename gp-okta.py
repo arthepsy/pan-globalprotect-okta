@@ -563,7 +563,6 @@ def main():
 	else:
 		pcmd = 'printf \'' + bugs + '{0}\''.format(cookie)
 	print()
-	conf['openconnect_certs'].close()
 	if conf.get('execute', '').lower() in ['1', 'true']:
 		cmd = shlex.split(cmd)
 		cmd = [os.path.expandvars(os.path.expanduser(x)) for x in cmd]
