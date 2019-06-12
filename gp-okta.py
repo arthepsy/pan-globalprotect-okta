@@ -148,6 +148,7 @@ def load_conf(cf):
 			if len(conf[k].strip()) == 0:
 				err('empty configuration key: {0}'.format(k))
 	conf['debug'] = conf.get('debug', '').lower() in ['1', 'true']
+	conf['openconnect_certs'].flush()
 	return conf
 
 def mfa_priority(conf, ftype, fprovider):
@@ -471,10 +472,10 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 	if len(portal_userauthcookie) == 0:
 		err('empty portal_userauthcookie')
 	gateway = x.find('.//gateways//entry').get('name')
-	with open(conf['openconnect_certs'].name, 'ab') as cafile:
-		for entry in x.find('.//root-ca'):
-			cert = entry.find('.//cert').text
-			cafile.write(to_b(cert))
+	for entry in x.find('.//root-ca'):
+		cert = entry.find('.//cert').text
+		conf['openconnect_certs'].write(to_b(cert))
+	conf['openconnect_certs'].flush()
 	return portal_userauthcookie, gateway
 
 # Combined first half of okta_saml with second half of okta_redirect
@@ -562,6 +563,7 @@ def main():
 	else:
 		pcmd = 'printf \'' + bugs + '{0}\''.format(cookie)
 	print()
+	conf['openconnect_certs'].close()
 	if conf.get('execute', '').lower() in ['1', 'true']:
 		cmd = shlex.split(cmd)
 		cmd = [os.path.expandvars(os.path.expanduser(x)) for x in cmd]
