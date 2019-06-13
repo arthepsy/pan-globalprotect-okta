@@ -230,15 +230,20 @@ def send_req(conf, s, name, url, data, **kwargs):
 		return r.headers, parse_rjson(r)
 	return r.headers, r.text
 
-
-def paloalto_prelogin(conf, s, again=False):
-	log('prelogin request [vpn_url]')
-	if again:
-		url = '{0}/ssl-vpn/prelogin.esp'.format(conf.get('vpn_url'))
+def paloalto_prelogin(conf, s, gateway=None):
+	verify = None
+	if gateway:
+		# 2nd round: use gateway
+		log('prelogin request [gateway]')
+		url = 'https://{0}/ssl-vpn/prelogin.esp'.format(gateway)
+		verify = conf.get('vpn_url_cert')
 	else:
+		# 1st round: use portal
+		log('prelogin request [vpn_url]')
 		url = '{0}/global-protect/prelogin.esp'.format(conf.get('vpn_url'))
-	h, c = send_req(conf, s, 'prelogin', url, {}, get=True,
-		verify=conf.get('vpn_url_cert'))
+		if conf.get('openconnect_certs') and os.path.getsize(conf.get('openconnect_certs').name) > 0:
+			verify = conf.get('openconnect_certs').name
+	h, c = send_req(conf, s, 'prelogin', url, {}, get=True, verify=verify)
 	x = parse_xml(c)
 	saml_req = x.find('.//saml-request')
 	if saml_req is None:
@@ -472,7 +477,7 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 	portal_userauthcookie = xtmp.text
 	if len(portal_userauthcookie) == 0:
 		err('empty portal_userauthcookie')
-	gateway = x.find('.//gateways//entry').get('name')
+	gateway = x.find('.//gateways//entry').get('name') # FIXME: this just grabs the very first, probably not what you want
 	for entry in x.find('.//root-ca'):
 		cert = entry.find('.//cert').text
 		conf['openconnect_certs'].write(to_b(cert))
@@ -480,29 +485,27 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 	return portal_userauthcookie, gateway
 
 # Combined first half of okta_saml with second half of okta_redirect
-def okta_saml_2(conf, s, saml_xml):
-	log('okta saml request')
+def okta_saml_2(conf, s, gateway, saml_xml):
+	log('okta saml request (2) [okta_url]')
 	url, data = parse_form(saml_xml)
-	r = s.post(url, data=data)
-	if r.status_code != 200:
-		err('redirect request failed. {0}'.format(reprr(r)))
-	dbg(conf.get('debug'), 'redirect.response', r.status_code, r.text)
-	xhtml = parse_html(r.text)
-
+	h, c = send_req(conf, s, 'okta saml request (2)', url, data,
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+	xhtml = parse_html(c)
 	url, data = parse_form(xhtml)
-	log('okta redirect form request')
-	r = s.post(url, data=data)
-	if r.status_code != 200:
-		err('redirect form request failed. {0}'.format(reprr(r)))
-	dbg(conf.get('debug'), 'form.response', r.status_code, r.text)
-	saml_username = r.headers.get('saml-username', '').strip()
-	if len(saml_username) == 0 and not again:
+	
+	log('okta redirect form request (2) [gateway]')
+	verify = None
+	if conf.get('openconnect_certs') and os.path.getsize(conf.get('openconnect_certs').name) > 0:
+		verify = conf.get('openconnect_certs').name
+	h, c = send_req(conf, s, 'okta redirect form (2)', url, data,
+		expected_url='https://{0}'.format(gateway), verify=verify)
+	saml_username = h.get('saml-username', '').strip()
+	if len(saml_username) == 0:
 		err('saml-username empty')
-	#saml_auth_status = r.headers.get('saml-auth-status', '').strip()
-	#saml_slo = r.headers.get('saml-slo', '').strip()
-	prelogin_cookie = r.headers.get('prelogin-cookie', '').strip()
+	prelogin_cookie = h.get('prelogin-cookie', '').strip()
 	if len(prelogin_cookie) == 0:
 		err('prelogin-cookie empty')
+
 	return saml_username, prelogin_cookie
 
 def main():
@@ -524,14 +527,16 @@ def main():
 	log('sessionToken: {0}'.format(token))
 	saml_username, prelogin_cookie = okta_redirect(conf, s, token, redirect_url)
 	userauthcookie, gateway = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
+	gateway = conf.get('gateway', gateway).strip()
 
 	log('portal-userauthcookie: {0}'.format(userauthcookie))
 	log('gateway: {0}'.format(gateway))
+	log('saml-username: {0}'.format(saml_username))
 
-	# Another dance?
+	# We're done with the portal now. Another dance with the gateway now?
 	if conf.get('another_dance', '').lower() in ['1', 'true']:
-		saml_xml = paloalto_prelogin(conf, s, again=True)
-		saml_username, prelogin_cookie = okta_saml_2(conf, s, saml_xml)
+		saml_xml = paloalto_prelogin(conf, s, gateway)
+		saml_username, prelogin_cookie = okta_saml_2(conf, s, gateway, saml_xml)
 
 	log('saml-username: {0}'.format(saml_username))
 	log('prelogin-cookie: {0}'.format(prelogin_cookie))
@@ -544,6 +549,7 @@ def main():
 	    cookie = userauthcookie
 	
 	username = saml_username
+
 	cmd = conf.get('openconnect_cmd', 'openconnect')
 	cmd += ' --protocol=gp -u \'{0}\''
 	cmd += ' --usergroup {1}'
@@ -552,15 +558,16 @@ def main():
 	if conf.get('openconnect_certs') and os.path.getsize(conf.get('openconnect_certs').name) > 0:
 		cmd += ' --cafile=\'{0}\''.format(conf.get('openconnect_certs').name)
 	cmd += ' --passwd-on-stdin ' + conf.get('openconnect_args', '') + ' \'{2}\''
-	cmd = cmd.format(username, cookie_type, conf.get('vpn_url'))
-	gw = conf.get('gateway', gateway).strip()
+	cmd = cmd.format(username, cookie_type,
+		'https://{0}'.format(gateway) if conf.get('another_dance', '').lower() in ['1', 'true'] else conf.get('vpn_url'))
+
 	bugs = ''
 	if conf.get('bug.nl', '').lower() in ['1', 'true']:
 		bugs += '\\n'
 	if conf.get('bug.username', '').lower() in ['1', 'true']:
 		bugs += '{0}\\n'.format(username.replace('\\', '\\\\'))
-	if len(gw) > 0:
-		pcmd = 'printf \'' + bugs + '{0}\\n{1}\''.format(cookie, gw)
+	if len(gateway) > 0:
+		pcmd = 'printf \'' + bugs + '{0}\\n{1}\''.format(cookie, gateway)
 	else:
 		pcmd = 'printf \'' + bugs + '{0}\''.format(cookie)
 	print()
