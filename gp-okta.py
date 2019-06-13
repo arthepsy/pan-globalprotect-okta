@@ -30,13 +30,11 @@ import requests
 import tempfile
 
 if sys.version_info >= (3,):
-	from urllib.parse import urlparse
-	from urllib.parse import urljoin
+	from urllib.parse import urlparse, urljoin
 	text_type = str
 	binary_type = bytes
 else:
-	from urlparse import urlparse
-	from urlparse import urljoin
+	from urlparse import urlparse, urljoin
 	text_type = unicode
 	binary_type = str
 	input = raw_input
