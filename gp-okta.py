@@ -57,7 +57,7 @@ def dbg(d, h, *xs):
 	print('---')
 
 def err(s):
-	print('err: {0}'.format(s))
+	print('err: {0}'.format(s), file=sys.stderr)
 	sys.exit(1)
 
 def parse_xml(xml):
