@@ -4,6 +4,9 @@
    The MIT License (MIT)
    
    Copyright (C) 2018 Andris Raugulis (moo@arthepsy.eu)
+   Copyright (C) 2018 Nick Lanham (nick@afternight.org)
+   Copyright (C) 2019 Aaron Lindsay (aclindsa@gmail.com)
+   Copyright (C) 2019 Tino Lange (coldcoff@yahoo.com)
    
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
