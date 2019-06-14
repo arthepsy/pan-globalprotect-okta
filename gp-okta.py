@@ -478,10 +478,12 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 	if len(portal_userauthcookie) == 0:
 		err('empty portal_userauthcookie')
 	gateway = x.find('.//gateways//entry').get('name') # FIXME: this just grabs the very first, probably not what you want
-	for entry in x.find('.//root-ca'):
-		cert = entry.find('.//cert').text
-		conf['openconnect_certs'].write(to_b(cert))
-	conf['openconnect_certs'].flush()
+	xtmp = x.find('.//root-ca')
+	if xtmp is not None:
+		for entry in xtmp:
+			cert = entry.find('.//cert').text
+			conf['openconnect_certs'].write(to_b(cert))
+		conf['openconnect_certs'].flush()
 	return portal_userauthcookie, gateway
 
 # Combined first half of okta_saml with second half of okta_redirect
