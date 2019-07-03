@@ -248,7 +248,12 @@ def paloalto_prelogin(conf, s, gateway=None):
 	saml_req = x.find('.//saml-request')
 	if saml_req is None:
 		msg = x.find('.//msg')
-		msg = msg.text.strip() if msg is not None else 'Probably you need a certificate?'
+		if msg is not None:
+			msg = msg.text
+		if msg is not None:
+			msg = msg.strip()
+		else:
+			msg = 'Probably you need a certificate?'
 		err('did not find saml request. {0}'.format(msg))
 	if len(saml_req.text.strip()) == 0:
 		err('empty saml request')
