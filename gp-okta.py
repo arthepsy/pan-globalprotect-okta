@@ -27,10 +27,10 @@
    THE SOFTWARE.
 """
 from __future__ import print_function, unicode_literals
-import io, os, sys, re, json, base64, getpass, subprocess, shlex, signal
+import io, os, sys, re, json, base64, getpass, subprocess, shlex, signal, tempfile, traceback
+
 from lxml import etree
 import requests
-import tempfile
 
 if sys.version_info >= (3,):
 	from urllib.parse import urlparse, urljoin
@@ -41,6 +41,25 @@ else:
 	text_type = unicode
 	binary_type = str
 	input = raw_input
+
+# Optional: fido2 support (webauthn via Yubikey)
+have_fido = False
+try:
+	from fido2.utils import websafe_decode, websafe_encode
+	from fido2.hid import CtapHidDevice
+	from fido2.client import Fido2Client
+	have_fido = True
+except ImportError:
+	pass
+
+# Optional: pyotp support
+have_pyotp = False
+try:
+	import pyotp
+	have_pyotp = True
+except ImportError:
+	pass
+
 
 to_b = lambda v: v if isinstance(v, binary_type) else v.encode('utf-8')
 to_u = lambda v: v if isinstance(v, text_type) else v.decode('utf-8')
@@ -155,7 +174,7 @@ def load_conf(cf):
 def mfa_priority(conf, ftype, fprovider):
 	if ftype == 'token:software:totp':
 		ftype = 'totp'
-	if ftype not in ['totp', 'sms']:
+	if ftype not in ['totp', 'sms', 'webauthn']:
 		return 0
 	mfa_order = conf.get('mfa_order', '')
 	if ftype in mfa_order:
@@ -163,7 +182,7 @@ def mfa_priority(conf, ftype, fprovider):
 	else:
 		priority = 0
 	value = conf.get('{0}.{1}'.format(ftype, fprovider))
-	if ftype == 'sms':
+	if ftype in ('sms', 'webauthn'):
 		if not (value or '').lower() in ['1', 'true']:
 			value = None
 	line_nr = conf.get('{0}.{1}.line'.format(ftype, fprovider), 0)
@@ -367,6 +386,8 @@ def okta_mfa(conf, s, j):
 			r = okta_mfa_totp(conf, s, f, state_token)
 		elif ftype == 'sms':
 			r = okta_mfa_sms(conf, s, f, state_token)
+		elif ftype == 'webauthn':
+			r = okta_mfa_webauthn(conf, s, f, state_token)
 		else:
 			r = None
 		if r is not None:
@@ -380,9 +401,7 @@ def okta_mfa_totp(conf, s, factor, state_token):
 	if len(secret) == 0:
 		code = input('{0} TOTP: '.format(provider)).strip()
 	else:
-		try:
-			import pyotp
-		except ImportError:
+		if not have_pyotp:
 			err('Need pyotp package, consider doing \'pip install pyotp\' (or similar)')
 		totp = pyotp.TOTP(secret)
 		code = totp.now()
@@ -403,7 +422,7 @@ def okta_mfa_sms(conf, s, factor, state_token):
 	provider = factor.get('provider', '')
 	data = {
 		'factorId': factor.get('id'),
-		'stateToken': state_token,
+		'stateToken': state_token
 	}
 	log('mfa {0} sms request [okta_url]'.format(provider))
 	h, j = send_req(conf, s, 'sms mfa (1)', factor.get('url'), data, json=True,
@@ -414,6 +433,52 @@ def okta_mfa_sms(conf, s, factor, state_token):
 	data['passCode'] = code
 	log('mfa {0} sms request [okta_url]'.format(provider))
 	h, j = send_req(conf, s, 'sms mfa (2)', factor.get('url'), data, json=True,
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+	return j
+
+def okta_mfa_webauthn(conf, s, factor, state_token):
+	if not have_fido:
+		err('Need fido2 package(s) for webauthn. Consider doing `pip install fido2` (or similar)')
+	devices = list(CtapHidDevice.list_devices())
+	if not devices:
+		err('webauthn configured, but no U2F devices found')
+		return None
+	provider = factor.get('provider', '')
+	log('mfa {0} challenge request [okta_url]'.format(provider))
+	data = {
+		'stateToken': state_token
+	}
+	h, j = send_req(conf, s, 'webauthn mfa challenge', factor.get('url'), data, json=True,
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+	factor = j['_embedded']['factor']
+	profile = factor['profile']
+	purl = list(urlparse(conf.get('okta_url')))
+	rpid = purl[1].split(':')[0]
+	origin = '{0}://{1}'.format(purl[0], rpid)
+	challenge = factor['_embedded']['challenge']['challenge']
+	credentialId = websafe_decode(profile['credentialId'])
+	allow_list = [{'type': 'public-key', 'id': credentialId}]
+	for dev in devices:
+		client = Fido2Client(dev, origin)
+		print('!!! Touch the flashing U2F device to authenticate... !!!')
+		try:
+			result = client.get_assertion(rpid, challenge, allow_list)
+			dbg(conf.get('debug'), 'assertion.result', result)
+			break
+		except:
+			traceback.print_exc(file=sys.stderr)
+			result = None
+	if not result:
+		return None
+	assertion, client_data = result[0][0], result[1] # only one cred in allowList, so only one response.
+	data = {
+		'stateToken': state_token,
+		'clientData': to_u(base64.b64encode(client_data)),
+		'signatureData': to_u(base64.b64encode(assertion.signature)),
+		'authenticatorData': to_u(base64.b64encode(assertion.auth_data))
+	}
+	log('mfa {0} signature request [okta_url]'.format(provider))
+	h, j = send_req(conf, s, 'uf2 mfa signature', j['_links']['next']['href'], data, json=True,
 		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	return j
 
@@ -589,7 +654,8 @@ def main():
 		cp.communicate()
 	else:
 		print('{0} | {1}'.format(pcmd, cmd))
+	return 0
 
 
 if __name__ == '__main__':
-	main()
+	sys.exit(main())
