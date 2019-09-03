@@ -526,14 +526,20 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 	log('getconfig request [vpn_url]')
 	url = '{0}/global-protect/getconfig.esp'.format(conf.get('vpn_url'))
 	data = {
+                #'jnlpReady': 'jnlpReady',
+                #'ok': 'Login',
+                #'direct': 'yes',
+		'clientVer': '4100',
+                #'prot': 'https:',
+		'clientos': 'Windows',
+		'os-version': 'Microsoft Windows 10 Pro, 64-bit',
+                #'server': '',
+		'computer': 'DESKTOP',
+                #'preferred-ip': '',
+		'inputStr': '',
 		'user': saml_username,
 		'passwd': '',
-		'inputStr': '',
-		'clientVer': '4100',
-		'clientos': 'Windows',
 		'clientgpversion': '4.1.0.98',
-		'computer': 'DESKTOP',
-		'os-version': 'Microsoft Windows 10 Pro, 64-bit',
 		# 'host-id': '00:11:22:33:44:55'
 		'prelogin-cookie': prelogin_cookie,
 		'ipv6-support': 'yes'
