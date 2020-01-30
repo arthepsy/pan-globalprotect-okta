@@ -172,7 +172,7 @@ def load_conf(cf):
 	return conf
 
 def mfa_priority(conf, ftype, fprovider):
-	if ftype == 'token:software:totp':
+	if ftype == 'token:software:totp' or (ftype, fprovider) == ('token', 'symantec'):
 		ftype = 'totp'
 	if ftype not in ['totp', 'sms', 'webauthn']:
 		return 0
@@ -382,7 +382,8 @@ def okta_mfa(conf, s, j):
 	for f in sorted(factors, key=lambda x: x.get('priority', 0), reverse=True):
 		#print(f)
 		ftype = f.get('type')
-		if ftype == 'token:software:totp':
+		fprovider = f.get('provider')
+		if ftype == 'token:software:totp' or (ftype, fprovider) == ('token', 'symantec'):
 			r = okta_mfa_totp(conf, s, f, state_token)
 		elif ftype == 'sms':
 			r = okta_mfa_sms(conf, s, f, state_token)
