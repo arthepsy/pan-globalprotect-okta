@@ -1,0 +1,21 @@
+#!/bin/bash
+
+GP_PASSWORD=$(kdialog --password "Okta Password")
+GP_TOTP_GOOGLE=$(kdialog --inputbox "Google Authenticator")
+
+GP_GATEWAY="US West"
+CHOSEN=$(kdialog --combobox "Gateway (dflt: $GP_GATEWAY)" \
+  "US Northwest"  \
+  "US West"       \
+  "US Central"    \
+  "US East"       \
+  "US Southwest"  \
+  "US Southeast"  \
+  "US Northeast"  \
+  "US South")
+
+GP_GATEWAY=${CHOSEN:-$GP_GATEWAY}
+
+DIR=$(cd $(dirname $0) && pwd)
+export GP_PASSWORD GP_TOTP_GOOGLE GP_GATEWAY
+exec python3 $DIR/gp-okta.py $DIR/gp-okta.conf

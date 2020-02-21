@@ -114,6 +114,7 @@ def load_conf(cf):
 		k = k.lower()
 		if k.startswith('gp_'):
 			k = k[3:]
+			k = k.replace("_", ".")
 			if len(k) == 0:
 				continue
 			conf[k] = v.strip()
@@ -317,13 +318,15 @@ def okta_mfa(conf, s, j):
 def okta_mfa_totp(conf, s, factor, state_token):
 	provider = factor.get('provider', '')
 	secret = conf.get('totp.{0}'.format(provider), '') or ''
+	print("provider: {}, secret: {}".format(provider, secret))
 	code = None
 	if len(secret) == 0:
 		code = input('{0} TOTP: '.format(provider)).strip()
 	else:
-		import pyotp
-		totp = pyotp.TOTP(secret)
-		code = totp.now()
+		# import pyotp
+		# totp = pyotp.TOTP(secret)
+		# code = totp.now()
+		code = secret
 	code = code or ''
 	if len(code) == 0:
 		return None
