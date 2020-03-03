@@ -1,21 +1,55 @@
 #!/bin/bash
 
-GP_PASSWORD=$(kdialog --password "Okta Password")
-GP_TOTP_GOOGLE=$(kdialog --inputbox "Google Authenticator")
+prompt_kdialog() {
+  GP_PASSWORD=$(kdialog --password "Okta Password")
+  GP_TOTP_GOOGLE=$(kdialog --inputbox "Google Authenticator (grandrounds.okta.com)")
+
+  CHOSEN=$(kdialog --combobox "Gateway (dflt: $GP_GATEWAY)" \
+    "US Northwest"  \
+    "US West"       \
+    "US Central"    \
+    "US East"       \
+    "US Southwest"  \
+    "US Southeast"  \
+    "US Northeast"  \
+    "US South")
+
+  GP_GATEWAY=${CHOSEN:-$GP_GATEWAY}
+}
+
+prompt_zenity() {
+  GP_PASSWORD=$(zenity --password --title "Okta Password" 2>/dev/null)
+  GP_TOTP_GOOGLE=$(zenity --title "Google Authenticator (grandrounds.okta.com)" --entry "${1}" 2>/dev/null)
+
+  CHOSEN=$(zenity --list --column=Gateway --title "Gateway (dflt: $GP_GATEWAY)" \
+    "US Northwest"  \
+    "US West"       \
+    "US Central"    \
+    "US East"       \
+    "US Southwest"  \
+    "US Southeast"  \
+    "US Northeast"  \
+    "US South" 2>/dev/null)
+
+  GP_GATEWAY=${CHOSEN:-$GP_GATEWAY}
+}
+
+prompt() {
+  if type kdialog &>/dev/null ; then
+    prompt_kdialog
+  elif type zenity &>/dev/null ; then
+    prompt_zenity
+  else
+    echo "No prompt utility found. Install kdialog or zenity, or write the command line prompter :)" 1>&2
+    exit
+  fi
+}
 
 GP_GATEWAY="US West"
-CHOSEN=$(kdialog --combobox "Gateway (dflt: $GP_GATEWAY)" \
-  "US Northwest"  \
-  "US West"       \
-  "US Central"    \
-  "US East"       \
-  "US Southwest"  \
-  "US Southeast"  \
-  "US Northeast"  \
-  "US South")
 
-GP_GATEWAY=${CHOSEN:-$GP_GATEWAY}
+prompt
 
 DIR=$(cd $(dirname $0) && pwd)
 export GP_PASSWORD GP_TOTP_GOOGLE GP_GATEWAY
+#env | grep GP_
 exec python3 $DIR/gp-okta.py $DIR/gp-okta.conf
