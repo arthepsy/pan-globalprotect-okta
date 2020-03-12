@@ -1,8 +1,8 @@
 #!/bin/bash
 
 prompt_kdialog() {
-  GP_PASSWORD=$(kdialog --password "Okta Password")
-  GP_TOTP_GOOGLE=$(kdialog --inputbox "Google Authenticator (grandrounds.okta.com)")
+  GP_PASSWORD="${GP_PASSWORD:-$(kdialog --password "Okta Password")}"
+  GP_TOTP_GOOGLE=$(kdialog --inputbox "MFA (grandrounds.okta.com) -- assumes Google Authenticator")
 
   CHOSEN=$(kdialog --combobox "Gateway (dflt: $GP_GATEWAY)" \
     "US Northwest"  \
@@ -18,8 +18,8 @@ prompt_kdialog() {
 }
 
 prompt_zenity() {
-  GP_PASSWORD=$(zenity --password --title "Okta Password" 2>/dev/null)
-  GP_TOTP_GOOGLE=$(zenity --title "Google Authenticator (grandrounds.okta.com)" --entry "${1}" 2>/dev/null)
+  GP_PASSWORD=${GP_PASSWORD:-$(zenity --password --title "Okta Password" 2>/dev/null)}
+  GP_TOTP_GOOGLE=$(zenity --title "MFA (grandrounds.okta.com) -- assumes Google Authenticator" --entry "${1}" 2>/dev/null)
 
   CHOSEN=$(zenity --list --column=Gateway --title "Gateway (dflt: $GP_GATEWAY)" \
     "US Northwest"  \
@@ -47,9 +47,16 @@ prompt() {
 
 GP_GATEWAY="US West"
 
+default_password() {
+  local password_file="${GR_HOME}/gpgs/${GR_USERNAME}-okta-password.gpg"
+  if [ -f "${password_file}" ] ; then
+    gpg -o - --use-agent --quiet "${password_file}"
+  fi
+}
+
+GP_PASSWORD=$(default_password)
 prompt
 
 DIR=$(cd $(dirname $0) && pwd)
 export GP_PASSWORD GP_TOTP_GOOGLE GP_GATEWAY
-#env | grep GP_
 exec python3 $DIR/gp-okta.py $DIR/gp-okta.conf
