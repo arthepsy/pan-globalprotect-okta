@@ -272,7 +272,7 @@ def paloalto_prelogin(conf, s, gateway=None):
 		if msg is not None:
 			msg = msg.strip()
 		else:
-			msg = 'Probably you need a certificate?'
+			msg = 'Probably SAML is disabled at the portal? Or you need a certificate? Try another_dance=0 with some concrete gateway instead.'
 		err('did not find saml request. {0}'.format(msg))
 	if len(saml_req.text.strip()) == 0:
 		err('empty saml request')
