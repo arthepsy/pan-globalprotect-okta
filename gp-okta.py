@@ -2,22 +2,22 @@
 # -*- coding: utf-8 -*-
 """
    The MIT License (MIT)
-   
+
    Copyright (C) 2018 Andris Raugulis (moo@arthepsy.eu)
    Copyright (C) 2018 Nick Lanham (nick@afternight.org)
    Copyright (C) 2019 Aaron Lindsay (aclindsa@gmail.com)
    Copyright (C) 2019 Tino Lange (coldcoff@yahoo.com)
-   
+
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
    in the Software without restriction, including without limitation the rights
    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
    copies of the Software, and to permit persons to whom the Software is
    furnished to do so, subject to the following conditions:
-   
+
    The above copyright notice and this permission notice shall be included in
    all copies or substantial portions of the Software.
-   
+
    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -226,7 +226,7 @@ def send_req(conf, s, name, url, data, **kwargs):
 		purl = (purl[0], purl[1].split(':')[0])
 		pexp = list(urlparse(kwargs.get('expected_url')))
 		pexp = (pexp[0], pexp[1].split(':')[0])
-		if purl != pexp: 
+		if purl != pexp:
 			err('{0}: unexpected url found {1} != {2}'.format(name, purl, pexp))
 	do_json = True if kwargs.get('json') else False
 	headers = {}
@@ -571,7 +571,7 @@ def okta_saml_2(conf, s, gateway, saml_xml):
 		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	xhtml = parse_html(c)
 	url, data = parse_form(xhtml)
-	
+
 	log('okta redirect form request (2) [gateway]')
 	verify = None
 	if conf.get('openconnect_certs') and os.path.getsize(conf.get('openconnect_certs').name) > 0:
@@ -593,7 +593,7 @@ def main():
 		sys.exit(1)
 
 	conf = load_conf(sys.argv[1])
-	
+
 	s = requests.Session()
 
 	if conf.get('client_cert'):
@@ -643,7 +643,7 @@ def main():
 	else:
 	    cookie_type = "portal:portal-userauthcookie"
 	    cookie = userauthcookie
-	
+
 	username = saml_username
 
 	cmd = conf.get('openconnect_cmd', 'openconnect')
