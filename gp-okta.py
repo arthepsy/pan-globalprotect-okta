@@ -599,28 +599,45 @@ def main():
 	if conf.get('client_cert'):
 		s.cert = conf.get('client_cert')
 
+	another_dance = conf.get('another_dance', '').lower() in ['1', 'true']
+
+	if conf.get('gateway'):
+		gateway = conf.get('gateway').strip()
+
+	if gateway and not another_dance:
+		vpn_url = 'https://{0}'.format(gateway)
+		if vpn_url != conf.get('vpn_url'):
+			log('Discarding \'vpn_url\', as concrete gateway is given and another_dance = 0')
+			conf['vpn_url'] = vpn_url
+
+	userauthcookie = None
+
 	s.headers['User-Agent'] = 'PAN GlobalProtect'
-	saml_xml = paloalto_prelogin(conf, s)
+	if another_dance or not gateway:
+		saml_xml = paloalto_prelogin(conf, s)
+	else:
+		saml_xml = paloalto_prelogin(conf, s, gateway)
 	redirect_url = okta_saml(conf, s, saml_xml)
 	token = okta_auth(conf, s)
 	log('sessionToken: {0}'.format(token))
 	saml_username, prelogin_cookie = okta_redirect(conf, s, token, redirect_url)
-	userauthcookie, gateway = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
-	gateway = conf.get('gateway', gateway).strip()
+	if not gateway:
+		userauthcookie, gateway = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
+		gateway = conf.get('gateway', gateway).strip()
 
 	log('portal-userauthcookie: {0}'.format(userauthcookie))
 	log('gateway: {0}'.format(gateway))
 	log('saml-username: {0}'.format(saml_username))
 
-	# We're done with the portal now. Another dance with the gateway now?
-	if conf.get('another_dance', '').lower() in ['1', 'true']:
+	if another_dance:
+		# 1st step: dance with the portal, 2nd step: dance with the gateway
 		saml_xml = paloalto_prelogin(conf, s, gateway)
 		saml_username, prelogin_cookie = okta_saml_2(conf, s, gateway, saml_xml)
 
 	log('saml-username: {0}'.format(saml_username))
 	log('prelogin-cookie: {0}'.format(prelogin_cookie))
 
-	if userauthcookie == 'empty' and prelogin_cookie != 'empty':
+	if (not userauthcookie or userauthcookie == 'empty') and prelogin_cookie != 'empty':
 	    cookie_type = "gateway:prelogin-cookie"
 	    cookie = prelogin_cookie
 	else:
