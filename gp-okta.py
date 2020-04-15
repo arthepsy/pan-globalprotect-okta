@@ -6,7 +6,8 @@
    Copyright (C) 2018 Andris Raugulis (moo@arthepsy.eu)
    Copyright (C) 2018 Nick Lanham (nick@afternight.org)
    Copyright (C) 2019 Aaron Lindsay (aclindsa@gmail.com)
-   Copyright (C) 2019 Tino Lange (coldcoff@yahoo.com)
+   Copyright (C) 2019 Taylor Dean (taylor@makeshift.dev)
+   Copyright (C) 2019-2020 Tino Lange (coldcoff@yahoo.com)
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +32,7 @@ import io, os, sys, re, json, base64, getpass, subprocess, shlex, signal, tempfi
 
 from lxml import etree
 import requests
+import argparse
 
 if sys.version_info >= (3,):
 	from urllib.parse import urlparse, urljoin
@@ -60,24 +62,35 @@ try:
 except ImportError:
 	pass
 
+# Optional: gnupg support
+have_gnupg = False
+try:
+	import gnupg
+	have_gnupg = True
+except ImportError:
+	pass
 
 to_b = lambda v: v if isinstance(v, binary_type) else v.encode('utf-8')
 to_u = lambda v: v if isinstance(v, text_type) else v.decode('utf-8')
 
+quiet = False
 
 def log(s):
-	print('[INFO] {0}'.format(s))
+	if not quiet:
+		print('[INFO] {0}'.format(s))
 
 def dbg(d, h, *xs):
+	if quiet:
+		return
 	if not d:
 		return
-	print('# {0}:'.format(h))
+	print('[DEBUG] {0}:'.format(h))
 	for x in xs:
-		print(x)
-	print('---')
+		print('[DEBUG] {0}'.format(x))
+	print('[DEBUG] ---')
 
 def err(s):
-	print('err: {0}'.format(s), file=sys.stderr)
+	print('[ERROR] {0}'.format(s), file=sys.stderr)
 	sys.exit(1)
 
 def parse_xml(xml):
@@ -85,21 +98,21 @@ def parse_xml(xml):
 		xml = bytes(bytearray(xml, encoding='utf-8'))
 		parser = etree.XMLParser(ns_clean=True, recover=True)
 		return etree.fromstring(xml, parser)
-	except:
-		err('failed to parse xml')
+	except Exception as e:
+		err('failed to parse xml: ' + e)
 
 def parse_html(html):
 	try:
 		parser = etree.HTMLParser()
 		return etree.fromstring(html, parser)
-	except:
-		err('failed to parse html')
+	except Exception as e:
+		err('failed to parse html: ' + e)
 
 def parse_rjson(r):
 	try:
 		return r.json()
-	except:
-		err('failed to parse json')
+	except Exception as e:
+		err('failed to parse json: ' + e)
 
 def parse_form(html, current_url = None):
 	xform = html.find('.//form')
@@ -119,21 +132,22 @@ def load_conf(cf):
 	log('load conf')
 	conf = {}
 	keys = ['vpn_url', 'username', 'password', 'okta_url']
+	if isinstance(cf, binary_type):
+		cf = cf.decode('utf-8')
 	line_nr = 0
-	with io.open(cf, 'r', encoding='utf-8') as fp:
-		for rline in fp:
-			line_nr += 1
-			line = rline.strip()
-			mx = re.match(r'^\s*([^=\s]+)\s*=\s*(.*?)\s*(?:#\s+.*)?\s*$', line)
-			if mx:
-				k, v = mx.group(1).lower(), mx.group(2)
-				if k.startswith('#'):
-					continue
-				for q in '"\'':
-					if re.match(r'^{0}.*{0}$'.format(q), v):
-						v = v[1:-1]
-				conf[k] = v
-				conf['{0}.line'.format(k)] = line_nr
+	for rline in cf.split('\n'):
+		line_nr += 1
+		line = rline.strip()
+		mx = re.match(r'^\s*([^=\s]+)\s*=\s*(.*?)\s*(?:#\s+.*)?\s*$', line)
+		if mx:
+			k, v = mx.group(1).lower(), mx.group(2)
+			if k.startswith('#'):
+				continue
+			for q in '"\'':
+				if re.match(r'^{0}.*{0}$'.format(q), v):
+					v = v[1:-1]
+			conf[k] = v
+			conf['{0}.line'.format(k)] = line_nr
 	for k, v in os.environ.items():
 		k = k.lower()
 		if k.startswith('gp_'):
@@ -262,7 +276,7 @@ def paloalto_prelogin(conf, s, gateway=None):
 		url = '{0}/global-protect/prelogin.esp'.format(conf.get('vpn_url'))
 		if conf.get('openconnect_certs') and os.path.getsize(conf.get('openconnect_certs').name) > 0:
 			verify = conf.get('openconnect_certs').name
-	h, c = send_req(conf, s, 'prelogin', url, {}, get=True, verify=verify)
+	_h, c = send_req(conf, s, 'prelogin', url, {}, get=True, verify=verify)
 	x = parse_xml(c)
 	saml_req = x.find('.//saml-request')
 	if saml_req is None:
@@ -278,8 +292,8 @@ def paloalto_prelogin(conf, s, gateway=None):
 		err('empty saml request')
 	try:
 		saml_raw = base64.b64decode(saml_req.text)
-	except:
-		err('failed to decode saml request')
+	except Exception as e:
+		err('failed to decode saml request: ' + e)
 	dbg(conf.get('debug'), 'prelogin.decoded', saml_raw)
 	saml_xml = parse_html(saml_raw)
 	return saml_xml
@@ -287,7 +301,7 @@ def paloalto_prelogin(conf, s, gateway=None):
 def okta_saml(conf, s, saml_xml):
 	log('okta saml request [okta_url]')
 	url, data = parse_form(saml_xml)
-	h, c = send_req(conf, s, 'saml', url, data,
+	_h, c = send_req(conf, s, 'saml', url, data,
 		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	redirect_url = get_redirect_url(conf, c, url)
 	if redirect_url is None:
@@ -307,7 +321,7 @@ def okta_auth(conf, s, stateToken = None):
 	} if stateToken is None else {
 		'stateToken': stateToken
 	}
-	h, j = send_req(conf, s, 'auth', url, data, json=True,
+	_h, j = send_req(conf, s, 'auth', url, data, json=True,
 		verify=conf.get('okta_url_cert'))
 
 	while True:
@@ -331,7 +345,7 @@ def okta_transaction_state(conf, s, j):
 		if len(state_token) == 0:
 			err('empty state token')
 		data = {'stateToken': state_token}
-		h, j = send_req(conf, s, 'skip', url, data, json=True,
+		_h, j = send_req(conf, s, 'skip', url, data, json=True,
 			expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 		return False, j
 	# status: password_expired
@@ -415,7 +429,7 @@ def okta_mfa_totp(conf, s, factor, state_token):
 		'passCode': code
 	}
 	log('mfa {0} totp request: {1} [okta_url]'.format(provider, code))
-	h, j = send_req(conf, s, 'totp mfa', factor.get('url'), data, json=True,
+	_h, j = send_req(conf, s, 'totp mfa', factor.get('url'), data, json=True,
 		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	return j
 
@@ -426,14 +440,14 @@ def okta_mfa_sms(conf, s, factor, state_token):
 		'stateToken': state_token
 	}
 	log('mfa {0} sms request [okta_url]'.format(provider))
-	h, j = send_req(conf, s, 'sms mfa (1)', factor.get('url'), data, json=True,
+	_h, j = send_req(conf, s, 'sms mfa (1)', factor.get('url'), data, json=True,
 		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	code = input('{0} SMS verification code: '.format(provider)).strip()
 	if len(code) == 0:
 		return None
 	data['passCode'] = code
 	log('mfa {0} sms request [okta_url]'.format(provider))
-	h, j = send_req(conf, s, 'sms mfa (2)', factor.get('url'), data, json=True,
+	_h, j = send_req(conf, s, 'sms mfa (2)', factor.get('url'), data, json=True,
 		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	return j
 
@@ -449,7 +463,7 @@ def okta_mfa_webauthn(conf, s, factor, state_token):
 	data = {
 		'stateToken': state_token
 	}
-	h, j = send_req(conf, s, 'webauthn mfa challenge', factor.get('url'), data, json=True,
+	_h, j = send_req(conf, s, 'webauthn mfa challenge', factor.get('url'), data, json=True,
 		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	factor = j['_embedded']['factor']
 	profile = factor['profile']
@@ -479,7 +493,7 @@ def okta_mfa_webauthn(conf, s, factor, state_token):
 		'authenticatorData': to_u(base64.b64encode(assertion.auth_data))
 	}
 	log('mfa {0} signature request [okta_url]'.format(provider))
-	h, j = send_req(conf, s, 'uf2 mfa signature', j['_links']['next']['href'], data, json=True,
+	_h, j = send_req(conf, s, 'uf2 mfa signature', j['_links']['next']['href'], data, json=True,
 		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	return j
 
@@ -545,7 +559,7 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 		'prelogin-cookie': prelogin_cookie,
 		'ipv6-support': 'yes'
 	}
-	h, c = send_req(conf, s, 'getconfig', url, data,
+	_h, c = send_req(conf, s, 'getconfig', url, data,
 		verify=conf.get('vpn_url_cert'))
 	x = parse_xml(c)
 	xtmp = x.find('.//portal-userauthcookie')
@@ -588,11 +602,48 @@ def okta_saml_2(conf, s, gateway, saml_xml):
 	return saml_username, prelogin_cookie
 
 def main():
-	if len(sys.argv) < 2:
-		print('usage: {0} <conf>'.format(sys.argv[0]))
-		sys.exit(1)
 
-	conf = load_conf(sys.argv[1])
+	parser = argparse.ArgumentParser(description="""
+￼    This is an OpenConnect wrapper script that automates connecting to a
+￼    PaloAlto Networks GlobalProtect VPN using Okta 2FA.""")
+
+	parser.add_argument('conf_file',
+		help='e.g. ~/.config/gp-okta.conf')
+	parser.add_argument('--gpg-decrypt', action='store_true',
+		help='use gpg and settings from gpg-home to decrypt gpg encrypted conf_file')
+	parser.add_argument('--gpg-home', default=os.path.expanduser('~/.gnupg'))
+	parser.add_argument('--quiet', default=False, action='store_true',
+		help='disable verbose logging')
+	args = parser.parse_args()
+
+	global quiet
+	quiet = args.quiet
+
+	assert os.path.exists(args.conf_file)
+	assert not args.gpg_decrypt or os.path.isdir(args.gpg_home)
+
+	config_contents = ''
+	with io.open(args.conf_file, 'rb') as fp:
+		config_contents = fp.read()
+
+	if args.conf_file.endswith('.gpg') and not args.gpg_decrypt:
+		err('conf file looks like gpg encrypted. Did you forget the --gpg-decrypt?')
+
+	if args.gpg_decrypt:
+		if not have_gnupg:
+			err('Need gnupg package for reading gnupg encrypted files. Consider doing `pip install python-gnupg` (or similar)')
+		gpg = gnupg.GPG(gnupghome=args.gpg_home)
+		decrypted_contents = gpg.decrypt(config_contents)
+
+		if not decrypted_contents.ok:
+			print('[ERROR] failed to decrypt config file:', file=sys.stderr)
+			print('[ERROR]     status: {}'.format(decrypted_contents.status), file=sys.stderr)
+			print('[ERROR]     error: {}'.format(decrypted_contents.stderr), file=sys.stderr)
+			sys.exit(1)
+
+		config_contents = decrypted_contents.data
+
+	conf = load_conf(config_contents)
 
 	s = requests.Session()
 
@@ -638,10 +689,10 @@ def main():
 	log('prelogin-cookie: {0}'.format(prelogin_cookie))
 
 	if (not userauthcookie or userauthcookie == 'empty') and prelogin_cookie != 'empty':
-	    cookie_type = "gateway:prelogin-cookie"
+	    cookie_type = 'gateway:prelogin-cookie'
 	    cookie = prelogin_cookie
 	else:
-	    cookie_type = "portal:portal-userauthcookie"
+	    cookie_type = 'portal:portal-userauthcookie'
 	    cookie = userauthcookie
 
 	username = saml_username
