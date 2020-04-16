@@ -127,7 +127,6 @@ def parse_form(html, current_url = None):
 			data[k] = v
 	return url, data
 
-
 def load_conf(cf):
 	log('load conf')
 	conf = {}
@@ -537,26 +536,26 @@ def okta_redirect(conf, s, session_token, redirect_url):
 			dbg(conf.get('debug'), 'saml prop', [saml_auth_status, saml_slo])
 			return saml_username, prelogin_cookie
 
-def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
+def paloalto_getconfig(conf, s, username = None, prelogin_cookie = None):
 	log('getconfig request [vpn_url]')
 	url = '{0}/global-protect/getconfig.esp'.format(conf.get('vpn_url'))
 	data = {
-                #'jnlpReady': 'jnlpReady',
-                #'ok': 'Login',
-                #'direct': 'yes',
+        #'jnlpReady': 'jnlpReady',
+        #'ok': 'Login',
+        #'direct': 'yes',
 		'clientVer': '4100',
-                #'prot': 'https:',
+        #'prot': 'https:',
 		'clientos': 'Windows',
 		'os-version': 'Microsoft Windows 10 Pro, 64-bit',
-                #'server': '',
+        #'server': '',
 		'computer': 'DESKTOP',
-                #'preferred-ip': '',
+        #'preferred-ip': '',
 		'inputStr': '',
-		'user': saml_username,
-		'passwd': '',
+		'user': username or conf['username'],
+		'passwd': '' if prelogin_cookie else conf['password'],
 		'clientgpversion': '4.1.0.98',
 		# 'host-id': '00:11:22:33:44:55'
-		'prelogin-cookie': prelogin_cookie,
+		'prelogin-cookie': prelogin_cookie or '',
 		'ipv6-support': 'yes'
 	}
 	_h, c = send_req(conf, s, 'getconfig', url, data,
@@ -568,14 +567,18 @@ def paloalto_getconfig(conf, s, saml_username, prelogin_cookie):
 	portal_userauthcookie = xtmp.text
 	if len(portal_userauthcookie) == 0:
 		err('empty portal_userauthcookie')
-	gateway = x.find('.//gateways//entry').get('name') # FIXME: this just grabs the very first, probably not what you want
+	gateways = set()
+	xtmp = x.find('.//gateways//external//list')
+	if xtmp is not None:
+		for entry in xtmp:
+			gateways.add(entry.get('name'))
 	xtmp = x.find('.//root-ca')
 	if xtmp is not None:
 		for entry in xtmp:
 			cert = entry.find('.//cert').text
 			conf['openconnect_certs'].write(to_b(cert))
 		conf['openconnect_certs'].flush()
-	return portal_userauthcookie, gateway
+	return portal_userauthcookie, gateways
 
 # Combined first half of okta_saml with second half of okta_redirect
 def okta_saml_2(conf, s, gateway, saml_xml):
@@ -612,6 +615,8 @@ def main():
 	parser.add_argument('--gpg-decrypt', action='store_true',
 		help='use gpg and settings from gpg-home to decrypt gpg encrypted conf_file')
 	parser.add_argument('--gpg-home', default=os.path.expanduser('~/.gnupg'))
+	parser.add_argument('--show-list-of-gateways', default=False, action='store_true',
+		help='get list of gateways from portal')
 	parser.add_argument('--quiet', default=False, action='store_true',
 		help='disable verbose logging')
 	args = parser.parse_args()
@@ -646,9 +651,17 @@ def main():
 	conf = load_conf(config_contents)
 
 	s = requests.Session()
+	s.headers['User-Agent'] = 'PAN GlobalProtect'
 
 	if conf.get('client_cert'):
 		s.cert = conf.get('client_cert')
+
+	if args.show_list_of_gateways:
+		userauthcookie, gateways = paloalto_getconfig(conf, s)
+		print("Gateways:")
+		for gateway in sorted(gateways):
+			print(" ", gateway)
+		sys.exit(0)
 
 	another_dance = conf.get('another_dance', '').lower() in ['1', 'true']
 
@@ -663,7 +676,6 @@ def main():
 
 	userauthcookie = None
 
-	s.headers['User-Agent'] = 'PAN GlobalProtect'
 	if another_dance or not gateway:
 		saml_xml = paloalto_prelogin(conf, s)
 	else:
@@ -672,21 +684,22 @@ def main():
 	token = okta_auth(conf, s)
 	log('sessionToken: {0}'.format(token))
 	saml_username, prelogin_cookie = okta_redirect(conf, s, token, redirect_url)
-	if not gateway:
-		userauthcookie, gateway = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
-		gateway = conf.get('gateway', gateway).strip()
+	if another_dance or not gateway:
+		userauthcookie, gateways = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
+		if not gateway and len(gateways):
+			gateway = gateways.pop() # this just grabs an arbitrary gateway
 
 	log('portal-userauthcookie: {0}'.format(userauthcookie))
 	log('gateway: {0}'.format(gateway))
 	log('saml-username: {0}'.format(saml_username))
+	log('prelogin-cookie: {0}'.format(prelogin_cookie))
 
 	if another_dance:
 		# 1st step: dance with the portal, 2nd step: dance with the gateway
 		saml_xml = paloalto_prelogin(conf, s, gateway)
 		saml_username, prelogin_cookie = okta_saml_2(conf, s, gateway, saml_xml)
-
-	log('saml-username: {0}'.format(saml_username))
-	log('prelogin-cookie: {0}'.format(prelogin_cookie))
+		log('saml-username (2): {0}'.format(saml_username))
+		log('prelogin-cookie (2): {0}'.format(prelogin_cookie))
 
 	if (not userauthcookie or userauthcookie == 'empty') and prelogin_cookie != 'empty':
 	    cookie_type = 'gateway:prelogin-cookie'
