@@ -607,8 +607,8 @@ def okta_saml_2(conf, s, gateway, saml_xml):
 def main():
 
 	parser = argparse.ArgumentParser(description="""
-￼    This is an OpenConnect wrapper script that automates connecting to a
-￼    PaloAlto Networks GlobalProtect VPN using Okta 2FA.""")
+	This is an OpenConnect wrapper script that automates connecting to a
+	PaloAlto Networks GlobalProtect VPN using Okta 2FA.""")
 
 	parser.add_argument('conf_file',
 		help='e.g. ~/.config/gp-okta.conf')
