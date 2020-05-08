@@ -188,7 +188,7 @@ def load_conf(cf):
 def mfa_priority(conf, ftype, fprovider):
 	if ftype == 'token:software:totp' or (ftype, fprovider) == ('token', 'symantec'):
 		ftype = 'totp'
-	if ftype not in ['totp', 'sms', 'webauthn']:
+	if ftype not in ['totp', 'sms', 'push', 'webauthn']:
 		return 0
 	mfa_order = conf.get('mfa_order', '')
 	if ftype in mfa_order:
