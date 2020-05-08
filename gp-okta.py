@@ -7,6 +7,7 @@
    Copyright (C) 2018 Nick Lanham (nick@afternight.org)
    Copyright (C) 2019 Aaron Lindsay (aclindsa@gmail.com)
    Copyright (C) 2019 Taylor Dean (taylor@makeshift.dev)
+   Copyright (C) 2020 Max Lanin (mlanin@evolutiongaming.com)
    Copyright (C) 2019-2020 Tino Lange (coldcoff@yahoo.com)
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -28,7 +29,7 @@
    THE SOFTWARE.
 """
 from __future__ import print_function, unicode_literals
-import io, os, sys, re, json, base64, getpass, subprocess, shlex, signal, tempfile, traceback
+import io, os, sys, time, re, json, base64, getpass, subprocess, shlex, signal, tempfile, traceback
 
 from lxml import etree
 import requests
@@ -400,6 +401,8 @@ def okta_mfa(conf, s, j):
 			r = okta_mfa_totp(conf, s, f, state_token)
 		elif ftype == 'sms':
 			r = okta_mfa_sms(conf, s, f, state_token)
+		elif ftype == 'push':
+			r = okta_mfa_push(conf, s, f, state_token)
 		elif ftype == 'webauthn':
 			r = okta_mfa_webauthn(conf, s, f, state_token)
 		else:
@@ -448,6 +451,26 @@ def okta_mfa_sms(conf, s, factor, state_token):
 	log('mfa {0} sms request [okta_url]'.format(provider))
 	_h, j = send_req(conf, s, 'sms mfa (2)', factor.get('url'), data, json=True,
 		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+	return j
+
+def okta_mfa_push(conf, s, factor, state_token):
+	provider = factor.get('provider', '')
+	data = {
+		'factorId': factor.get('id'),
+		'stateToken': state_token,
+	}
+	log('mfa {0} push request [okta_url]'.format(provider))
+	status = 'MFA_CHALLENGE'
+	counter = 0
+	while status == 'MFA_CHALLENGE':
+		_h, j = send_req(conf, s, 'push mfa ({0})'.format(counter),
+			factor.get('url'), data, json=True,
+			expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+		status = j.get('status', '').strip()
+		dbg(conf.get('debug'), 'status', status)
+		if status == 'MFA_CHALLENGE':
+			time.sleep(3.33)
+		counter += 1
 	return j
 
 def okta_mfa_webauthn(conf, s, factor, state_token):
