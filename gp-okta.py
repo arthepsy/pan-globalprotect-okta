@@ -667,6 +667,8 @@ def main():
 
 	if conf.get('gateway'):
 		gateway = conf.get('gateway').strip()
+	else:
+		gateway = None
 
 	if gateway and not another_dance:
 		vpn_url = 'https://{0}'.format(gateway)
