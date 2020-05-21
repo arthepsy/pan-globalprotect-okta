@@ -18,7 +18,7 @@ some don't. For example, andOTP on Android do support this feature.
 ## usage
 This utility depends on [requests](http://www.python-requests.org/) and [lxml](https://lxml.de/)
 Python libraries. If TOTP secret is being used, then [pyotp](https://github.com/pyotp/pyotp)
-is also required. For YubiKey, [fido2][https://github.com/Yubico/python-fido2] is required.
+is also required. For YubiKey, [fido2](https://github.com/Yubico/python-fido2) is required.
 
 ```
    ./gp-okta.py gp-okta.conf
