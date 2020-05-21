@@ -2,13 +2,13 @@
 
 Command-line client for PaloAlto Networks' GlobalProtect VPN, integrated with OKTA.
 This utility will do the _authentication dance_ with OKTA to retrieve `portal-userauthcookie`,
-which will be passed to [OpenConnect with PAN GlobalProtect support](https://github.com/dlenski/openconnect)
+which will be passed to [OpenConnect](https://github.com/openconnect/openconnect)
 for creating actual VPN connection. Compatible with Python 2 and 3. Tested on
-FreeBSD, Linux and MacOS X.
+FreeBSD, Linux and MacOS X. Tested with OpenConnect 8.00 - 8.10.
 
-It also supports Google and OKTA two factor authentication and can work without
-user interaction, if initial TOTP secret is provided. Otherwise, it will ask for
-generated code.
+It also supports multiple second factor authentication implementations like Google, OKTA, YubiKey, SMS, etc.
+TOPT authentication can work without user interaction, if initial secret is provided. 
+Otherwise, it will ask for generated code.
 
 To gather TOTP secret, there are two possibilities - either scan the provided QR
 code with _normal_ QR code scanner and write down the secret. Or create backup
@@ -18,7 +18,7 @@ some don't. For example, andOTP on Android do support this feature.
 ## usage
 This utility depends on [requests](http://www.python-requests.org/) and [lxml](https://lxml.de/)
 Python libraries. If TOTP secret is being used, then [pyotp](https://github.com/pyotp/pyotp)
-is also required.
+is also required. For YubiKey, [fido2][https://github.com/Yubico/python-fido2] is required.
 
 ```
    ./gp-okta.py gp-okta.conf
@@ -43,6 +43,14 @@ Configuration file should be self-explanatory. Options can be overridden with
 override `password` option in configuration file.
 
 ## changelog
+### v1.00 (2020-05-xx)
+- supported MFA: push, Symantec, WebAuthN/YubiKey
+- support second authentication dance
+- support using client certificate
+- verify server certificates
+- auto-detect openconnect version
+- ability to specify pipe format manually
+
 ### v0.99 (2019-02-14)
 - supported MFA: OKTA, Google, SMS
 - interactive and hard-coded MFA
@@ -57,4 +65,3 @@ If `openconnect` returns with `ioctl` or `fgets (stdin): Resource temporarily un
 error, then this `openconnect` version requires different `openconnect_fmt` than detected
 or manually specified. Run `openconnect` manually and paste line-by-line required options
 to figure out required `openconnect_fmt`. Also, please, open an issue and report it.
-
