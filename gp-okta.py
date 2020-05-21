@@ -682,7 +682,7 @@ def choose_gateway_url(conf, gateways):
 			break
 	if not gateway_host:
 		# this just grabs an arbitrary gateway
-		gateway_host = gateways.keys().pop()
+		gateway_host = next(iter(gateways))
 	return 'https://{0}'.format(gateway_host)
 
 def main():
@@ -823,7 +823,7 @@ def main():
 		if p.returncode == 0:
 			p = subprocess.Popen([openconnect_bin, '-V'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 			o = p.communicate()[0]
-			mx = re.search(r'OpenConnect version v(\d)\.(\d+)', o, flags=re.IGNORECASE)
+			mx = re.search(r'OpenConnect version v(\d)\.(\d+)', to_u(o), flags=re.IGNORECASE)
 			if mx:
 				vmajor, vminor = mx.groups()
 				if vmajor >= '8' and vminor >= '05':
