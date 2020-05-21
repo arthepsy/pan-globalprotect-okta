@@ -45,6 +45,13 @@ else:
 	binary_type = str
 	input = raw_input
 
+try:
+	# from typing import IO, BinaryIO
+	from typing import Any, Dict, List, Union, Tuple
+	from typing import Optional, NoReturn
+except ImportError:
+	pass
+
 # Optional: fido2 support (webauthn via Yubikey)
 have_fido = False
 try:
@@ -77,14 +84,17 @@ to_u = lambda v: v if isinstance(v, text_type) else v.decode('utf-8')
 quiet = False
 
 def log(s):
+	# type: (str) -> None
 	if not quiet:
-		print('[INFO] {0}'.format(s))
+		print(u'[INFO] {0}'.format(s))
 
 def warn(s):
+	# type: (str) -> None
 	if not quiet:
-		print('[WARN] {0}'.format(s))
+		print(u'[WARN] {0}'.format(s))
 
 def dbg(d, h, *xs):
+	# type: (Any, str, Union[str, List, Dict]) -> None
 	if quiet:
 		return
 	if not d:
@@ -92,49 +102,55 @@ def dbg(d, h, *xs):
 	for x in xs:
 		if not isinstance(x, dict) and not isinstance(x, list):
 			for line in x.split('\n'):
-				print('[DEBUG] {0}: {1}'.format(h, line))
+				print(u'[DEBUG] {0}: {1}'.format(h, line))
 		else:
-			print('[DEBUG] {0}: {1}'.format(h, x))
+			print(u'[DEBUG] {0}: {1}'.format(h, x))
 
 def dbg_form(conf, name, data):
+	# type: (Dict[str, str], str, Dict[str, str]) -> None
 	if not conf.get('debug'):
 		return
 	for k in data:
-		dbg(True, name, '{0}: {1}'.format(k, data[k]))
-		if k in ['SAMLRequest', 'SAMLResponse']:
+		dbg(True, name, u'{0}: {1}'.format(k, data[k]))
+		if k in [u'SAMLRequest', u'SAMLResponse']:
 			try:
-				saml_raw = base64.b64decode(data[k])
-				dbg(True, name, '{0}.decoded: {1}'.format(k,  saml_raw))
+				saml_raw = to_u(base64.b64decode(data[k]))
+				dbg(True, name, u'{0}.decoded: {1}'.format(k,  saml_raw))
 			except Exception:
 				pass
 
 
 def err(s):
+	# type: (str) -> NoReturn
 	print('[ERROR] {0}'.format(s), file=sys.stderr)
 	sys.exit(1)
 
 def parse_xml(xml):
+	# type: (str) -> etree.ElementTree
 	try:
-		xml = bytes(bytearray(xml, encoding='utf-8'))
+		rxml = bytes(bytearray(xml, encoding='utf-8'))
 		parser = etree.XMLParser(ns_clean=True, recover=True)
-		return etree.fromstring(xml, parser)
+		return etree.fromstring(rxml, parser)
 	except Exception as e:
-		err('failed to parse xml: ' + e)
+		err('failed to parse xml: {0}'.format(e))
 
 def parse_html(html):
+	# type: (str) -> etree.ElementTree
 	try:
 		parser = etree.HTMLParser()
 		return etree.fromstring(html, parser)
 	except Exception as e:
-		err('failed to parse html: ' + e)
+		err('failed to parse html: {0}'.format(e))
 
 def parse_rjson(r):
+	# type: (requests.Response) -> Dict
 	try:
 		return r.json()
 	except Exception as e:
-		err('failed to parse json: ' + e)
+		err('failed to parse json: {0}'.format(e))
 
 def parse_form(html, current_url = None):
+	# type: (etree.ElementTree, Optional[str]) -> Tuple[str, Dict[str, str]]
 	xform = html.find('.//form')
 	url = xform.attrib.get('action', '').strip()
 	if not url.startswith('http') and current_url:
@@ -148,6 +164,7 @@ def parse_form(html, current_url = None):
 	return url, data
 
 def load_conf(cf):
+	# tpye: (str) -> Dict[str, str]
 	log('load conf')
 	conf = {}
 	keys = ['vpn_url', 'username', 'password', 'okta_url']
@@ -205,6 +222,7 @@ def load_conf(cf):
 	return conf
 
 def mfa_priority(conf, ftype, fprovider):
+	# type: (Dict[str, str], str, str) -> int
 	if ftype == 'token:software:totp' or (ftype, fprovider) == ('token', 'symantec'):
 		ftype = 'totp'
 	if ftype not in ['totp', 'sms', 'push', 'webauthn']:
@@ -218,7 +236,7 @@ def mfa_priority(conf, ftype, fprovider):
 	if ftype in ('sms', 'webauthn'):
 		if not (value or '').lower() in ['1', 'true']:
 			value = None
-	line_nr = conf.get('{0}.{1}.line'.format(ftype, fprovider), 0)
+	line_nr = int(conf.get('{0}.{1}.line'.format(ftype, fprovider), 0))
 	if value is None:
 		priority += 0
 	elif len(value) == 0:
@@ -228,6 +246,7 @@ def mfa_priority(conf, ftype, fprovider):
 	return priority
 
 def get_state_token(conf, c):
+	# tpye: (Dict[str, str], str) -> str
 	rx_state_token = re.search(r'var\s*stateToken\s*=\s*\'([^\']+)\'', c)
 	if not rx_state_token:
 		dbg(conf.get('debug'), 'not found', 'stateToken')
@@ -236,6 +255,7 @@ def get_state_token(conf, c):
 	return state_token
 
 def get_redirect_url(conf, c, current_url = None):
+	# type: (Dict[str, str], str, Optional[str]) -> Optional[str]
 	rx_base_url = re.search(r'var\s*baseUrl\s*=\s*\'([^\']+)\'', c)
 	rx_from_uri = re.search(r'var\s*fromUri\s*=\s*\'([^\']+)\'', c)
 	if not rx_from_uri:
@@ -253,41 +273,51 @@ def get_redirect_url(conf, c, current_url = None):
 	return base_url + from_uri
 
 def parse_url(url):
+	# type: (str) -> Tuple[str, str]
 	purl = list(urlparse(url))
 	return (purl[0], purl[1].split(':')[0])
 
-def send_req(conf, s, name, url, data, **kwargs):
+def _send_req_pre(conf, name, url, data, expected_url=None):
+	# type: (Dict[str, str], str, str, Dict[str, Any], Optional[str]) -> None
 	dbg(conf.get('debug'), '{0}.request'.format(name), url)
 	dbg_form(conf, 'send.req.data', data)
-	expected_url = kwargs.get('expected_url')
 	if expected_url:
 		purl, pexp = parse_url(url), parse_url(expected_url)
 		if purl != pexp:
 			err('{0}: unexpected url found {1} != {2}'.format(name, purl, pexp))
-	do_json = bool(kwargs.get('json', False))
-	headers = {}
-	if do_json:
-		data = json.dumps(data)
-		headers['Accept'] = 'application/json'
-		headers['Content-Type'] = 'application/json'
-	if kwargs.get('get'):
-		r = s.get(url, headers=headers,
-			verify=kwargs.get('verify', True))
-	else:
-		r = s.post(url, data=data, headers=headers,
-			verify=kwargs.get('verify', True))
+
+def _send_req_post(conf, r, name, can_fail=False):
+	# type: (Dict[str, str], requests.Response, str, bool) -> None
 	hdump = '\n'.join([k + ': ' + v for k, v in sorted(r.headers.items())])
 	rr = 'status: {0}\n\n{1}\n\n{2}'.format(r.status_code, hdump, r.text)
-	can_fail = bool(kwargs.get('can_fail', False))
 	if not can_fail and r.status_code != 200:
 		err('{0}.request failed.\n{1}'.format(name, rr))
 	dbg(conf.get('debug'), '{0}.response'.format(name), rr)
-	if do_json:
-		return r.status_code, r.headers, parse_rjson(r)
+
+def send_req(conf, s, name, url, data, get=False, expected_url=None, verify=True, can_fail=False):
+	# type: (Dict[str, str], requests.Session, str, str, Dict[str, Any], bool, str, Union[bool, str], bool) -> Tuple[int, requests.structures.CaseInsensitiveDict[str], str]
+	_send_req_pre(conf, name, url, data, expected_url)
+	if get:
+		r = s.get(url, verify=verify)
+	else:
+		r = s.post(url, data=data, verify=verify)
+	_send_req_post(conf, r, name, can_fail)
 	return r.status_code, r.headers, r.text
 
+def send_json_req(conf, s, name, url, data, get=False, expected_url=None, verify=True, can_fail=False):
+	# type: (Dict[str, str], requests.Session, str, str, Dict[str, Any], bool, str, Union[bool, str], bool) -> Tuple[int, requests.structures.CaseInsensitiveDict[str], Dict[str, Any]]
+	_send_req_pre(conf, name, url, data, expected_url)
+	headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+	if get:
+		r = s.get(url, headers=headers, verify=verify)
+	else:
+		r = s.post(url, headers=headers, json=data, verify=verify)
+	_send_req_post(conf, r, name, can_fail)
+	return r.status_code, r.headers, parse_rjson(r)
+
 def paloalto_prelogin(conf, s, gateway_url=None):
-	verify = None
+	# type: (Dict[str, str], requests.Session, Optional[str]) -> str
+	verify = False
 	if gateway_url:
 		# 2nd round or direct gateway: use gateway
 		log('prelogin request [gateway_url]')
@@ -314,25 +344,27 @@ def paloalto_prelogin(conf, s, gateway_url=None):
 	if len(saml_req.text.strip()) == 0:
 		err('empty saml request')
 	try:
-		saml_raw = base64.b64decode(saml_req.text)
+		saml_raw = to_u(base64.b64decode(saml_req.text))
 	except Exception as e:
-		err('failed to decode saml request: ' + e)
+		err('failed to decode saml request: {0}'.format(e))
 	dbg(conf.get('debug'), 'prelogin.decoded', saml_raw)
 	saml_xml = parse_html(saml_raw)
 	return saml_xml
 
 def okta_saml(conf, s, saml_xml):
+	# type: (Dict[str, str], requests.Session, str) -> str
 	log('okta saml request [okta_url]')
 	url, data = parse_form(saml_xml)
 	dbg_form(conf, 'okta.saml request', data)
 	_, _h, c = send_req(conf, s, 'saml', url, data,
-		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert', True))
 	redirect_url = get_redirect_url(conf, c, url)
 	if redirect_url is None:
 		err('did not find redirect url')
 	return redirect_url
 
 def okta_auth(conf, s, stateToken = None):
+	# type: (Dict[str, str], requests.Session, Optional[str]) -> Any
 	log('okta auth request [okta_url]')
 	url = '{0}/api/v1/authn'.format(conf.get('okta_url'))
 	data = {
@@ -345,8 +377,7 @@ def okta_auth(conf, s, stateToken = None):
 	} if stateToken is None else {
 		'stateToken': stateToken
 	}
-	_, _h, j = send_req(conf, s, 'auth', url, data, json=True,
-		verify=conf.get('okta_url_cert'))
+	_, _h, j = send_json_req(conf, s, 'auth', url, data, verify=conf.get('okta_url_cert', True))
 
 	while True:
 		ok, r = okta_transaction_state(conf, s, j)
@@ -355,6 +386,7 @@ def okta_auth(conf, s, stateToken = None):
 		j = r
 
 def okta_transaction_state(conf, s, j):
+	# type: (Dict[str, str], requests.Session, Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]
 	# https://developer.okta.com/docs/api/resources/authn#transaction-state
 	status = j.get('status', '').strip().lower()
 	dbg(conf.get('debug'), 'status', status)
@@ -369,8 +401,8 @@ def okta_transaction_state(conf, s, j):
 		if len(state_token) == 0:
 			err('empty state token')
 		data = {'stateToken': state_token}
-		_, _h, j = send_req(conf, s, 'skip', url, data, json=True,
-			expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+		_, _h, j = send_json_req(conf, s, 'skip', url, data, 
+			expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert', True))
 		return False, j
 	# status: password_expired
 	# status: recovery
@@ -395,6 +427,7 @@ def okta_transaction_state(conf, s, j):
 	return False, None
 
 def okta_mfa(conf, s, j):
+	# type: (Dict[str, str], requests.Session, Dict[str, Any]) -> Dict[str, Any]
 	state_token = j.get('stateToken', '').strip()
 	if len(state_token) == 0:
 		err('empty state token')
@@ -419,9 +452,9 @@ def okta_mfa(conf, s, j):
 	if len(factors) == 0:
 		err('no factors found')
 	for f in sorted(factors, key=lambda x: x.get('priority', 0), reverse=True):
-		#print(f)
 		ftype = f.get('type')
 		fprovider = f.get('provider')
+		r = None # type: Optional[Dict[str, Any]]
 		if ftype == 'token:software:totp' or (ftype, fprovider) == ('token', 'symantec'):
 			r = okta_mfa_totp(conf, s, f, state_token)
 		elif ftype == 'sms':
@@ -430,14 +463,12 @@ def okta_mfa(conf, s, j):
 			r = okta_mfa_push(conf, s, f, state_token)
 		elif ftype == 'webauthn':
 			r = okta_mfa_webauthn(conf, s, f, state_token)
-		else:
-			r = None
 		if r is not None:
 			return r
 	err('no factors processed')
-	return None
 
 def okta_mfa_totp(conf, s, factor, state_token):
+	# type: (Dict[str, str], requests.Session, Dict[str, str], str) -> Optional[Dict[str, Any]]
 	provider = factor.get('provider', '')
 	secret = conf.get('totp.{0}'.format(provider), '') or ''
 	code = None
@@ -457,29 +488,31 @@ def okta_mfa_totp(conf, s, factor, state_token):
 		'passCode': code
 	}
 	log('mfa {0} totp request: {1} [okta_url]'.format(provider, code))
-	_, _h, j = send_req(conf, s, 'totp mfa', factor.get('url'), data, json=True,
-		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+	_, _h, j = send_json_req(conf, s, 'totp mfa', factor.get('url', ''), data,
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert', True))
 	return j
 
 def okta_mfa_sms(conf, s, factor, state_token):
+	# type: (Dict[str, str], requests.Session, Dict[str, str], str) -> Optional[Dict[str, Any]]
 	provider = factor.get('provider', '')
 	data = {
 		'factorId': factor.get('id'),
 		'stateToken': state_token
 	}
 	log('mfa {0} sms request [okta_url]'.format(provider))
-	_, _h, j = send_req(conf, s, 'sms mfa (1)', factor.get('url'), data, json=True,
-		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+	_, _h, j = send_json_req(conf, s, 'sms mfa (1)', factor.get('url', ''), data,
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert', True))
 	code = input('{0} SMS verification code: '.format(provider)).strip()
 	if len(code) == 0:
 		return None
 	data['passCode'] = code
 	log('mfa {0} sms request [okta_url]'.format(provider))
-	_, _h, j = send_req(conf, s, 'sms mfa (2)', factor.get('url'), data, json=True,
-		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+	_, _h, j = send_json_req(conf, s, 'sms mfa (2)', factor.get('url', ''), data, 
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert', True))
 	return j
 
 def okta_mfa_push(conf, s, factor, state_token):
+	# type: (Dict[str, str], requests.Session, Dict[str, str], str) -> Optional[Dict[str, Any]]
 	provider = factor.get('provider', '')
 	data = {
 		'factorId': factor.get('id'),
@@ -489,9 +522,9 @@ def okta_mfa_push(conf, s, factor, state_token):
 	status = 'MFA_CHALLENGE'
 	counter = 0
 	while status == 'MFA_CHALLENGE':
-		_, _h, j = send_req(conf, s, 'push mfa ({0})'.format(counter),
-			factor.get('url'), data, json=True,
-			expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+		_, _h, j = send_json_req(conf, s, 'push mfa ({0})'.format(counter),
+			factor.get('url', ''), data,
+			expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert', True))
 		status = j.get('status', '').strip()
 		dbg(conf.get('debug'), 'status', status)
 		if status == 'MFA_CHALLENGE':
@@ -500,6 +533,7 @@ def okta_mfa_push(conf, s, factor, state_token):
 	return j
 
 def okta_mfa_webauthn(conf, s, factor, state_token):
+	# type: (Dict[str, str], requests.Session, Dict[str, str], str) -> Optional[Dict[str, Any]]
 	if not have_fido:
 		err('Need fido2 package(s) for webauthn. Consider doing `pip install fido2` (or similar)')
 	devices = list(CtapHidDevice.list_devices())
@@ -511,21 +545,20 @@ def okta_mfa_webauthn(conf, s, factor, state_token):
 	data = {
 		'stateToken': state_token
 	}
-	_, _h, j = send_req(conf, s, 'webauthn mfa challenge', factor.get('url'), data, json=True,
-		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
-	factor = j['_embedded']['factor']
-	profile = factor['profile']
-	purl = list(urlparse(conf.get('okta_url')))
-	rpid = purl[1].split(':')[0]
-	origin = '{0}://{1}'.format(purl[0], rpid)
-	challenge = factor['_embedded']['challenge']['challenge']
+	_, _h, j = send_json_req(conf, s, 'webauthn mfa challenge', factor.get('url', ''), data,
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert', True))
+	rfactor = j['_embedded']['factor']
+	profile = rfactor['profile']
+	purl = parse_url(conf.get('okta_url', ''))
+	origin = '{0}://{1}'.format(purl[0], purl[1])
+	challenge = rfactor['_embedded']['challenge']['challenge']
 	credentialId = websafe_decode(profile['credentialId'])
 	allow_list = [{'type': 'public-key', 'id': credentialId}]
 	for dev in devices:
 		client = Fido2Client(dev, origin)
 		print('!!! Touch the flashing U2F device to authenticate... !!!')
 		try:
-			result = client.get_assertion(rpid, challenge, allow_list)
+			result = client.get_assertion(purl[1], challenge, allow_list)
 			dbg(conf.get('debug'), 'assertion.result', result)
 			break
 		except Exception:
@@ -541,13 +574,15 @@ def okta_mfa_webauthn(conf, s, factor, state_token):
 		'authenticatorData': to_u(base64.b64encode(assertion.auth_data))
 	}
 	log('mfa {0} signature request [okta_url]'.format(provider))
-	_, _h, j = send_req(conf, s, 'uf2 mfa signature', j['_links']['next']['href'], data, json=True,
-		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+	_, _h, j = send_json_req(conf, s, 'uf2 mfa signature', j['_links']['next']['href'], data,
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert', True))
 	return j
 
 def okta_redirect(conf, s, session_token, redirect_url):
+	# type: (Dict[str, str], requests.Session, str, str) -> Tuple[str, str]
 	rc = 0
-	form_url, form_data = None, {}
+	form_url = None # type: Optional[str]
+	form_data = {} # type: Dict[str, str]
 	while True:
 		if rc > 10:
 			err('redirect rabbit hole is too deep...')
@@ -562,7 +597,7 @@ def okta_redirect(conf, s, session_token, redirect_url):
 			url = '{0}/login/sessionCookieRedirect'.format(conf.get('okta_url'))
 			log('okta redirect request {0} [okta_url]'.format(rc))
 			_, h, c = send_req(conf, s, 'redirect', url, data,
-				verify=conf.get('okta_url_cert'))
+				verify=conf.get('okta_url_cert', True))
 			state_token = get_state_token(conf, c)
 			redirect_url = get_redirect_url(conf, c, url)
 			if redirect_url:
@@ -576,14 +611,14 @@ def okta_redirect(conf, s, session_token, redirect_url):
 				okta_auth(conf, s, state_token)
 		elif form_url:
 			log('okta redirect form request [vpn_url]')
-			purl, pexp = parse_url(form_url), parse_url(conf.get('vpn_url'))
+			purl, pexp = parse_url(form_url), parse_url(conf.get('vpn_url', ''))
 			if purl != pexp:
 				# NOTE: redirect to nearest (geo) portal/gateway without any prior knowledge
 				warn('{0}: unexpected url found {1} != {2}'.format('redirect form', purl, pexp))
 				_, h, c = send_req(conf, s, 'redirect form', form_url, form_data)
 			else:
 				_, h, c = send_req(conf, s, 'redirect form', form_url, form_data,
-					expected_url=conf.get('vpn_url'), verify=conf.get('vpn_url_cert'))
+					expected_url=conf.get('vpn_url'), verify=conf.get('vpn_url_cert', True))
 		saml_username = h.get('saml-username', '').strip()
 		prelogin_cookie = h.get('prelogin-cookie', '').strip()
 		if saml_username and prelogin_cookie:
@@ -593,6 +628,7 @@ def okta_redirect(conf, s, session_token, redirect_url):
 			return saml_username, prelogin_cookie
 
 def paloalto_getconfig(conf, s, username = None, prelogin_cookie = None, can_fail = False):
+	# type: (Dict[str, str], requests.Session, Optional[str], Optional[str], bool) -> Tuple[int, str, Dict[str, str]]
 	log('getconfig request [vpn_url]')
 	url = '{0}/global-protect/getconfig.esp'.format(conf.get('vpn_url'))
 	data = {
@@ -615,9 +651,9 @@ def paloalto_getconfig(conf, s, username = None, prelogin_cookie = None, can_fai
 		'ipv6-support': 'yes'
 	}
 	sc, _h, c = send_req(conf, s, 'getconfig', url, data,
-		verify=conf.get('vpn_url_cert'), can_fail=can_fail)
+		verify=conf.get('vpn_url_cert', True), can_fail=can_fail)
 	if sc != 200:
-		return sc, '', ''
+		return sc, '', {}
 	x = parse_xml(c)
 	xtmp = x.find('.//portal-userauthcookie')
 	if xtmp is None:
@@ -642,16 +678,17 @@ def paloalto_getconfig(conf, s, username = None, prelogin_cookie = None, can_fai
 
 # Combined first half of okta_saml with second half of okta_redirect
 def okta_saml_2(conf, s, gateway_url, saml_xml):
+	# type: (Dict[str, str], requests.Session, str, str) -> Tuple[str, str]
 	log('okta saml request (2) [okta_url]')
 	url, data = parse_form(saml_xml)
 	dbg_form(conf, 'okta.saml request(2)', data)
 	_, h, c = send_req(conf, s, 'okta saml request (2)', url, data,
-		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
+		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert', True))
 	xhtml = parse_html(c)
 	url, data = parse_form(xhtml)
 	dbg_form(conf, 'okta.saml request(2)', data)
 	log('okta redirect form request (2) [gateway]')
-	verify = None
+	verify = False
 	if conf.get('openconnect_certs') and os.path.getsize(conf.get('openconnect_certs').name) > 0:
 		verify = conf.get('openconnect_certs').name
 	_, h, c = send_req(conf, s, 'okta redirect form (2)', url, data,
@@ -662,15 +699,16 @@ def okta_saml_2(conf, s, gateway_url, saml_xml):
 	prelogin_cookie = h.get('prelogin-cookie', '').strip()
 	if len(prelogin_cookie) == 0:
 		err('prelogin-cookie empty')
-
 	return saml_username, prelogin_cookie
 
 def output_gateways(gateways):
+	# type: (Dict[str, str]) -> None
 	print("Gateways:")
 	for k in sorted(gateways.keys()):
 		print("\t{0} {1}".format(k, gateways[k]))
 
 def choose_gateway_url(conf, gateways):
+	# type: (Dict[str, str], Dict[str, str]) -> str
 	gateway_url = conf.get('gateway_url', '').strip()
 	if gateway_url:
 		return gateway_url
@@ -688,7 +726,7 @@ def choose_gateway_url(conf, gateways):
 	return 'https://{0}'.format(gateway_host)
 
 def main():
-
+	# type: () -> int
 	parser = argparse.ArgumentParser(description="""
 	This is an OpenConnect wrapper script that automates connecting to a
 	PaloAlto Networks GlobalProtect VPN using Okta 2FA.""")
@@ -844,7 +882,8 @@ def main():
 		cmd = [os.path.expandvars(os.path.expanduser(x)) for x in cmd]
 		pp = subprocess.Popen(shlex.split(pcmd), stdout=subprocess.PIPE)
 		cp = subprocess.Popen(cmd, stdin=pp.stdout, stdout=sys.stdout)
-		pp.stdout.close()
+		if pp.stdout is not None:
+			pp.stdout.close()
 		# Do not abort on SIGINT. openconnect will perform proper exit & cleanup
 		signal.signal(signal.SIGINT, signal.SIG_IGN)
 		cp.communicate()
