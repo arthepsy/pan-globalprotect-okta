@@ -48,7 +48,7 @@ else:
 # Optional: fido2 support (webauthn via Yubikey)
 have_fido = False
 try:
-	from fido2.utils import websafe_decode, websafe_encode
+	from fido2.utils import websafe_decode
 	from fido2.hid import CtapHidDevice
 	from fido2.client import Fido2Client
 	have_fido = True
@@ -105,7 +105,7 @@ def dbg_form(conf, name, data):
 			try:
 				saml_raw = base64.b64decode(data[k])
 				dbg(True, name, '{0}.decoded: {1}'.format(k,  saml_raw))
-			except:
+			except Exception:
 				pass
 
 
@@ -227,7 +227,7 @@ def mfa_priority(conf, ftype, fprovider):
 		priority += (512 - line_nr)
 	return priority
 
-def get_state_token(conf, c, current_url = None):
+def get_state_token(conf, c):
 	rx_state_token = re.search(r'var\s*stateToken\s*=\s*\'([^\']+)\'', c)
 	if not rx_state_token:
 		dbg(conf.get('debug'), 'not found', 'stateToken')
@@ -264,7 +264,7 @@ def send_req(conf, s, name, url, data, **kwargs):
 		purl, pexp = parse_url(url), parse_url(expected_url)
 		if purl != pexp:
 			err('{0}: unexpected url found {1} != {2}'.format(name, purl, pexp))
-	do_json = True if kwargs.get('json') else False
+	do_json = bool(kwargs.get('json', False))
 	headers = {}
 	if do_json:
 		data = json.dumps(data)
@@ -278,7 +278,7 @@ def send_req(conf, s, name, url, data, **kwargs):
 			verify=kwargs.get('verify', True))
 	hdump = '\n'.join([k + ': ' + v for k, v in sorted(r.headers.items())])
 	rr = 'status: {0}\n\n{1}\n\n{2}'.format(r.status_code, hdump, r.text)
-	can_fail = True if kwargs.get('can_fail', False) else False
+	can_fail = bool(kwargs.get('can_fail', False))
 	if not can_fail and r.status_code != 200:
 		err('{0}.request failed.\n{1}'.format(name, rr))
 	dbg(conf.get('debug'), '{0}.response'.format(name), rr)
@@ -350,7 +350,7 @@ def okta_auth(conf, s, stateToken = None):
 
 	while True:
 		ok, r = okta_transaction_state(conf, s, j)
-		if ok == True:
+		if ok:
 			return r
 		j = r
 
@@ -392,6 +392,7 @@ def okta_transaction_state(conf, s, j):
 		return True, session_token
 	print(j)
 	err('unknown status: {0}'.format(status))
+	return False, None
 
 def okta_mfa(conf, s, j):
 	state_token = j.get('stateToken', '').strip()
@@ -434,6 +435,7 @@ def okta_mfa(conf, s, j):
 		if r is not None:
 			return r
 	err('no factors processed')
+	return None
 
 def okta_mfa_totp(conf, s, factor, state_token):
 	provider = factor.get('provider', '')
@@ -526,7 +528,7 @@ def okta_mfa_webauthn(conf, s, factor, state_token):
 			result = client.get_assertion(rpid, challenge, allow_list)
 			dbg(conf.get('debug'), 'assertion.result', result)
 			break
-		except:
+		except Exception:
 			traceback.print_exc(file=sys.stderr)
 			result = None
 	if not result:
@@ -561,7 +563,7 @@ def okta_redirect(conf, s, session_token, redirect_url):
 			log('okta redirect request {0} [okta_url]'.format(rc))
 			_, h, c = send_req(conf, s, 'redirect', url, data,
 				verify=conf.get('okta_url_cert'))
-			state_token = get_state_token(conf, c, url)
+			state_token = get_state_token(conf, c)
 			redirect_url = get_redirect_url(conf, c, url)
 			if redirect_url:
 				form_url, form_data = None, {}
@@ -743,8 +745,7 @@ def main():
 		if sc == 200:
 			output_gateways(gateways)
 			return 0
-		else:
-			log('gateway list requires authentication')
+		log('gateway list requires authentication')
 
 	another_dance = conf.get('another_dance', '').lower() in ['1', 'true']
 	gateway_url = conf.get('gateway_url', '').strip()
@@ -773,8 +774,7 @@ def main():
 		if sc == 200:
 			output_gateways(gateways)
 			return 0
-		else:
-			err('could not list gateways')
+		err('could not list gateways')
 
 	if another_dance or not gateway_url:
 		_, userauthcookie, gateways = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
@@ -819,7 +819,7 @@ def main():
 		openconnect_bin = os.path.expandvars(os.path.expanduser(openconnect_bin))
 		with open(os.devnull, 'wb') as fnull:
 			p  = subprocess.Popen(['command', '-v', openconnect_bin], stdin=subprocess.PIPE, stdout=fnull, stderr=subprocess.STDOUT)
-			p.communicate()[0]
+			_ = p.communicate()[0]
 		if p.returncode == 0:
 			p = subprocess.Popen([openconnect_bin, '-V'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 			o = p.communicate()[0]
