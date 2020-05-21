@@ -42,6 +42,15 @@ Configuration file should be self-explanatory. Options can be overridden with
 `GP_` prefixed respective environment variables, e.g., `GP_PASSWORD` will
 override `password` option in configuration file.
 
+## changelog
+### v0.99 (2019-02-14)
+- supported MFA: OKTA, Google, SMS
+- interactive and hard-coded MFA
+- configurable gateway choice
+- Python2 and Python3 support
+- Dockerfile example
+- workarounds for known issues
+
 ## known issues
 
 If `openconnect` returns with `ioctl` error, then this version has a bug, which
