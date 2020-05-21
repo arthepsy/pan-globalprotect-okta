@@ -85,10 +85,25 @@ def dbg(d, h, *xs):
 		return
 	if not d:
 		return
-	print('[DEBUG] {0}:'.format(h))
 	for x in xs:
-		print('[DEBUG] {0}'.format(x))
-	print('[DEBUG] ---')
+		if not isinstance(x, dict) and not isinstance(x, list):
+			for line in x.split('\n'):
+				print('[DEBUG] {0}: {1}'.format(h, line))
+		else:
+			print('[DEBUG] {0}: {1}'.format(h, x))
+
+def dbg_form(conf, name, data):
+	if not conf.get('debug'):
+		return
+	for k in data:
+		dbg(True, name, '{0}: {1}'.format(k, data[k]))
+		if k in ['SAMLRequest', 'SAMLResponse']:
+			try:
+				saml_raw = base64.b64decode(data[k])
+				dbg(True, name, '{0}.decoded: {1}'.format(k,  saml_raw))
+			except:
+				pass
+
 
 def err(s):
 	print('[ERROR] {0}'.format(s), file=sys.stderr)
@@ -235,6 +250,7 @@ def get_redirect_url(conf, c, current_url = None):
 
 def send_req(conf, s, name, url, data, **kwargs):
 	dbg(conf.get('debug'), '{0}.request'.format(name), url)
+	dbg_form(conf, 'send.req.data', data)
 	if kwargs.get('expected_url'):
 		purl = list(urlparse(url))
 		purl = (purl[0], purl[1].split(':')[0])
@@ -302,6 +318,7 @@ def paloalto_prelogin(conf, s, gateway_url=None):
 def okta_saml(conf, s, saml_xml):
 	log('okta saml request [okta_url]')
 	url, data = parse_form(saml_xml)
+	dbg_form(conf, 'okta.saml request', data)
 	_, _h, c = send_req(conf, s, 'saml', url, data,
 		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	redirect_url = get_redirect_url(conf, c, url)
@@ -391,7 +408,7 @@ def okta_mfa(conf, s, j):
 			'provider': provider,
 			'priority': mfa_priority(conf, factor_type, provider),
 			'url': factor_url})
-	dbg(conf.get('debug'), 'factors', factors)
+	dbg(conf.get('debug'), 'factors', *factors)
 	if len(factors) == 0:
 		err('no factors found')
 	for f in sorted(factors, key=lambda x: x.get('priority', 0), reverse=True):
@@ -545,6 +562,7 @@ def okta_redirect(conf, s, session_token, redirect_url):
 			else:
 				xhtml = parse_html(c)
 				form_url, form_data = parse_form(xhtml, url)
+				dbg_form(conf, 'okta.redirect request {0}'.format(rc), data)
 			if state_token is not None:
 				log('stateToken: {0}'.format(state_token))
 				okta_auth(conf, s, state_token)
@@ -612,11 +630,12 @@ def paloalto_getconfig(conf, s, username = None, prelogin_cookie = None, can_fai
 def okta_saml_2(conf, s, gateway_url, saml_xml):
 	log('okta saml request (2) [okta_url]')
 	url, data = parse_form(saml_xml)
+	dbg_form(conf, 'okta.saml request(2)', data)
 	_, h, c = send_req(conf, s, 'okta saml request (2)', url, data,
 		expected_url=conf.get('okta_url'), verify=conf.get('okta_url_cert'))
 	xhtml = parse_html(c)
 	url, data = parse_form(xhtml)
-
+	dbg_form(conf, 'okta.saml request(2)', data)
 	log('okta redirect form request (2) [gateway]')
 	verify = None
 	if conf.get('openconnect_certs') and os.path.getsize(conf.get('openconnect_certs').name) > 0:
