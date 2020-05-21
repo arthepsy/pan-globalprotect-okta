@@ -55,5 +55,6 @@ override `password` option in configuration file.
 
 If `openconnect` returns with `ioctl` or `fgets (stdin): Resource temporarily unavailable`
 error, then this `openconnect` version requires different `openconnect_fmt` than detected
-or manually specified. Run `openconnect` manually and paste line-by-line required options.
+or manually specified. Run `openconnect` manually and paste line-by-line required options
+to figure out required `openconnect_fmt`. Also, please, open an issue and report it.
 
