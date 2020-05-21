@@ -812,15 +812,32 @@ def main():
 	cmd = cmd.format(username, cookie_type,
 		gateway_url if conf.get('another_dance', '').lower() in ['1', 'true'] else conf.get('vpn_url'))
 
-	bugs = ''
-	if conf.get('bug.nl', '').lower() in ['1', 'true']:
-		bugs += '\\n'
-	if conf.get('bug.username', '').lower() in ['1', 'true']:
-		bugs += '{0}\\n'.format(username.replace('\\', '\\\\'))
-	if len(gateway_name) > 0:
-		pcmd = 'printf \'' + bugs + '{0}\\n{1}\''.format(cookie, gateway_name)
-	else:
-		pcmd = 'printf \'' + bugs + '{0}\''.format(cookie)
+	pfmt = conf.get('openconnect_fmt')
+	if pfmt is None:
+		pfmt = '<cookie><gateway_name>'
+		openconnect_bin = conf.get('openconnect_cmd', 'openconnect').split()[-1:][0]
+		openconnect_bin = os.path.expandvars(os.path.expanduser(openconnect_bin))
+		with open(os.devnull, 'wb') as fnull:
+			p  = subprocess.Popen(['command', '-v', openconnect_bin], stdin=subprocess.PIPE, stdout=fnull, stderr=subprocess.STDOUT)
+			p.communicate()[0]
+		if p.returncode == 0:
+			p = subprocess.Popen([openconnect_bin, '-V'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+			o = p.communicate()[0]
+			mx = re.search(r'OpenConnect version v(\d)\.(\d+)', o, flags=re.IGNORECASE)
+			if mx:
+				vmajor, vminor = mx.groups()
+				if vmajor >= '8' and vminor >= '05':
+					pfmt = '<cookie><gateway_name><cookie>'
+	rmnl = pfmt.endswith('>')
+	pfmt = pfmt.replace('<cookie>', cookie + '\\n')
+	pfmt = pfmt.replace('<gateway_name>', gateway_name + '\\n' if len(gateway_name) > 0 else '')
+	for k in ['username', 'password', 'gateway_url']:
+		pfmt = pfmt.replace('<{0}>'.format(k), conf.get(k) + '\\n' if len(conf.get(k, '').strip()) > 0 else '')
+	pfmt = pfmt.replace('<saml_username>', saml_username + '\\n')
+	if rmnl and pfmt.endswith('\\n'):
+		pfmt = pfmt[:-2]
+	pcmd = 'printf \'{0}\''.format(pfmt)
+
 	print()
 	if conf.get('execute', '').lower() in ['1', 'true']:
 		cmd = shlex.split(cmd)
