@@ -80,6 +80,10 @@ def log(s):
 	if not quiet:
 		print('[INFO] {0}'.format(s))
 
+def warn(s):
+	if not quiet:
+		print('[WARN] {0}'.format(s))
+
 def dbg(d, h, *xs):
 	if quiet:
 		return
@@ -248,14 +252,16 @@ def get_redirect_url(conf, c, current_url = None):
 	base_url = to_b(rx_base_url.group(1)).decode('unicode_escape').strip()
 	return base_url + from_uri
 
+def parse_url(url):
+	purl = list(urlparse(url))
+	return (purl[0], purl[1].split(':')[0])
+
 def send_req(conf, s, name, url, data, **kwargs):
 	dbg(conf.get('debug'), '{0}.request'.format(name), url)
 	dbg_form(conf, 'send.req.data', data)
-	if kwargs.get('expected_url'):
-		purl = list(urlparse(url))
-		purl = (purl[0], purl[1].split(':')[0])
-		pexp = list(urlparse(kwargs.get('expected_url')))
-		pexp = (pexp[0], pexp[1].split(':')[0])
+	expected_url = kwargs.get('expected_url')
+	if expected_url:
+		purl, pexp = parse_url(url), parse_url(expected_url)
 		if purl != pexp:
 			err('{0}: unexpected url found {1} != {2}'.format(name, purl, pexp))
 	do_json = True if kwargs.get('json') else False
@@ -568,8 +574,14 @@ def okta_redirect(conf, s, session_token, redirect_url):
 				okta_auth(conf, s, state_token)
 		elif form_url:
 			log('okta redirect form request [vpn_url]')
-			_, h, c = send_req(conf, s, 'redirect form', form_url, form_data,
-				expected_url=conf.get('vpn_url'), verify=conf.get('vpn_url_cert'))
+			purl, pexp = parse_url(form_url), parse_url(conf.get('vpn_url'))
+			if purl != pexp:
+				# NOTE: redirect to nearest (geo) portal/gateway without any prior knowledge
+				warn('{0}: unexpected url found {1} != {2}'.format('redirect form', purl, pexp))
+				_, h, c = send_req(conf, s, 'redirect form', form_url, form_data)
+			else:
+				_, h, c = send_req(conf, s, 'redirect form', form_url, form_data,
+					expected_url=conf.get('vpn_url'), verify=conf.get('vpn_url_cert'))
 		saml_username = h.get('saml-username', '').strip()
 		prelogin_cookie = h.get('prelogin-cookie', '').strip()
 		if saml_username and prelogin_cookie:
