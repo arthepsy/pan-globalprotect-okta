@@ -227,6 +227,7 @@ class Conf(object):
 				log('using temporary file {0} for storing certificates'.format(self.certs_fh.name))
 			self.certs = self.certs_fh.name
 		self.certs_fh.write(cert)
+		self.certs_fh.flush()
 	
 	def get_cert(self, name, default_verify=True):
 		# type: (str, bool) -> Union[str, bool]
