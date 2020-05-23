@@ -226,7 +226,7 @@ class Conf(object):
 				self.certs_fh = tempfile.NamedTemporaryFile(prefix='gpvpn_', delete=False)
 				log('using temporary file {0} for storing certificates'.format(self.certs_fh.name))
 			self.certs = self.certs_fh.name
-		self.certs_fh.write(cert)
+		self.certs_fh.write(to_b(cert))
 		self.certs_fh.flush()
 	
 	def get_cert(self, name, default_verify=True):
