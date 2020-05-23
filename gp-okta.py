@@ -198,7 +198,7 @@ class Conf(object):
 		self._lines = {} # type: Dict[str, int]
 		self.debug = False
 		self.vpn_url = ''  # for reassignment
-		self.certs = ''  # for type
+		self.certs = ''  # for filename
 	
 	def __getattr__(self, name):
 		# type: (str) -> str
@@ -220,10 +220,11 @@ class Conf(object):
 		if not cert:
 			return
 		if not self.certs:
-			if 'openconnect_certs' in self._store:
-				self.certs_fh = io.open(self._store['openconnect_certs'], 'wb')
+			if 'certs' in self._store:
+				self.certs_fh = io.open(self._store['certs'], 'wb')
 			else:
-				self.certs_fh = tempfile.NamedTemporaryFile()
+				self.certs_fh = tempfile.NamedTemporaryFile(prefix='gpvpn_', delete=False)
+				log('using temporary file {0} for storing certificates'.format(self.certs_fh.name))
 			self.certs = self.certs_fh.name
 		self.certs_fh.write(cert)
 	
@@ -271,12 +272,16 @@ class Conf(object):
 			conf._store['username'] = input('username: ').strip()
 		if len(conf._store.get('password', '').strip()) == 0:
 			conf._store['password'] = getpass.getpass('password: ').strip()
-		for cert_name in ['vpn_url_cert', 'okta_url_cert', 'client_cert']:
+		for k in conf._store.keys():
+			if not k.endswith('_cert'):
+				continue
 			cert_file = conf._store.get(k, '').strip()
 			if cert_file:
 				cert_file = os.path.expandvars(os.path.expanduser(cert_file))
 				if not os.path.exists(cert_file):
-					err('configured "{0}" file "{1}" does not exist'.format(cert_name, cert_file))
+					err('configured "{0}" file "{1}" does not exist'.format(k, cert_file))
+				if k.endswith('_cli_cert'):
+					continue
 				with io.open(cert_file, 'rb') as fp:
 					conf.add_cert(fp.read())
 		for k in keys:
@@ -391,15 +396,15 @@ def paloalto_prelogin(conf, s, gateway_url=None):
 		# 2nd round or direct gateway: use gateway
 		log('prelogin request [gateway_url]')
 		url = '{0}/ssl-vpn/prelogin.esp'.format(gateway_url)
-		verify = conf.get_cert('vpn_url', True)
-	else:
-		# 1st round: use portal
-		log('prelogin request [vpn_url]')
-		url = '{0}/global-protect/prelogin.esp'.format(conf.vpn_url)
 		if conf.certs:
 			verify = conf.certs
 		else:
 			verify = True
+	else:
+		# 1st round: use portal
+		log('prelogin request [vpn_url]')
+		url = '{0}/global-protect/prelogin.esp'.format(conf.vpn_url)
+		verify = conf.get_cert('vpn_url', True)
 	_, _h, c = send_req(conf, s, 'prelogin', url, {}, get=True, verify=verify)
 	x = parse_xml(c)
 	saml_req = x.find('.//saml-request')
@@ -683,9 +688,12 @@ def okta_redirect(conf, s, session_token, redirect_url):
 			log('okta redirect form request [vpn_url]')
 			purl, pexp = parse_url(form_url), parse_url(conf.vpn_url)
 			if purl != pexp:
-				# NOTE: redirect to nearest (geo) portal/gateway without any prior knowledge
+				# NOTE: redirect to nearest (geo) gateway without any prior knowledge
 				warn('{0}: unexpected url found {1} != {2}'.format('redirect form', purl, pexp))
-				_, h, c = send_req(conf, s, 'redirect form', form_url, form_data)
+				verify = True # type: Union[str, bool]
+				if conf.certs:
+					verify = conf.certs
+				_, h, c = send_req(conf, s, 'redirect form', form_url, form_data, verify=verify)
 			else:
 				_, h, c = send_req(conf, s, 'redirect form', form_url, form_data,
 					expected_url=conf.vpn_url, verify=conf.get_cert('vpn_url', True))
@@ -757,7 +765,7 @@ def okta_saml_2(conf, s, gateway_url, saml_xml):
 	url, data = parse_form(xhtml)
 	dbg_form(conf, 'okta.saml request(2)', data)
 	log('okta redirect form request (2) [gateway]')
-	verify = False # type: Union[str, bool]
+	verify = True # type: Union[str, bool]
 	if conf.certs:
 		verify = conf.certs
 	_, h, c = send_req(conf, s, 'okta redirect form (2)', url, data,
@@ -842,8 +850,8 @@ def main():
 	s = requests.Session()
 	s.headers['User-Agent'] = 'PAN GlobalProtect'
 
-	if conf.client_cert:
-		s.cert = conf.client_cert
+	if conf.okta_cli_cert:
+		s.cert = conf.okta_cli_cert
 
 	if args.list_gateways:
 		log('listing gateways')
@@ -910,11 +918,13 @@ def main():
 	cmd = conf.openconnect_cmd or 'openconnect'
 	cmd += ' --protocol=gp -u \'{0}\''
 	cmd += ' --usergroup {1}'
-	if conf.client_cert:
-		cmd += ' --certificate=\'{0}\''.format(conf.client_cert)
+	if conf.vpn_cli_cert:
+		cmd += ' --certificate=\'{0}\''.format(conf.vpn_cli_cert)
 	if conf.certs:
 		cmd += ' --cafile=\'{0}\''.format(conf.certs)
 	cmd += ' --passwd-on-stdin ' + conf.openconnect_args + ' \'{2}\''
+	if conf.certs:
+		cmd += '; rm -f \'{0}\''.format(conf.certs)
 	cmd = cmd.format(username, cookie_type,
 		gateway_url if conf.get_bool('another_dance') else conf.vpn_url)
 
