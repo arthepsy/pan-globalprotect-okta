@@ -934,6 +934,8 @@ def main():
 
 	cmd = conf.openconnect_cmd or 'openconnect'
 	cmd += ' --protocol=gp -u \'{0}\''
+	if gateway_name:
+		cmd += ' --authgroup=\'{0}\''.format(gateway_name)
 	cmd += ' --usergroup {1}'
 	if conf.vpn_cli_cert:
 		cmd += ' --certificate=\'{0}\''.format(conf.vpn_cli_cert)
@@ -945,23 +947,10 @@ def main():
 
 	pfmt = conf.openconnect_fmt
 	if not pfmt:
-		pfmt = '<cookie><gateway_name>'
-		openconnect_bin = (conf.openconnect_cmd or 'openconnect').split()[-1:][0]
-		openconnect_bin = os.path.expandvars(os.path.expanduser(openconnect_bin))
-		with open(os.devnull, 'wb') as fnull:
-			p  = subprocess.Popen(['command', '-v', openconnect_bin], stdin=subprocess.PIPE, stdout=fnull, stderr=subprocess.STDOUT)
-			_ = p.communicate()[0]
-		if p.returncode == 0:
-			p = subprocess.Popen([openconnect_bin, '-V'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-			o = p.communicate()[0]
-			mx = re.search(r'OpenConnect version v(\d)\.(\d+)', to_u(o), flags=re.IGNORECASE)
-			if mx:
-				vmajor, vminor = mx.groups()
-				if vmajor >= '8' and vminor >= '05':
-					pfmt = '<cookie><gateway_name><cookie>'
+		pfmt = '<cookie><cookie>'
 	rmnl = pfmt.endswith('>')
 	pfmt = pfmt.replace('<cookie>', cookie + '\\n')
-	pfmt = pfmt.replace('<gateway_name>', gateway_name + '\\n' if len(gateway_name) > 0 else '')
+	pfmt = pfmt.replace('<gateway>', gateway_name + '\\n' if len(gateway_name) > 0 else '')
 	for k in ['username', 'password', 'gateway_url']:
 		v = conf.get_value(k).strip()
 		pfmt = pfmt.replace('<{0}>'.format(k), v + '\\n' if len(v) > 0 else '')
