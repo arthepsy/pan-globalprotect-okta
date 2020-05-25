@@ -940,8 +940,6 @@ def main():
 	if conf.certs:
 		cmd += ' --cafile=\'{0}\''.format(conf.certs)
 	cmd += ' --passwd-on-stdin ' + conf.openconnect_args + ' \'{2}\''
-	if conf.certs:
-		cmd += '; rm -f \'{0}\''.format(conf.certs)
 	cmd = cmd.format(username, cookie_type,
 		gateway_url if conf.get_bool('another_dance') else conf.vpn_url)
 
@@ -982,7 +980,14 @@ def main():
 		# Do not abort on SIGINT. openconnect will perform proper exit & cleanup
 		signal.signal(signal.SIGINT, signal.SIG_IGN)
 		cp.communicate()
+		if conf.certs:
+			try:
+				os.unlink(conf.certs)
+			except Exception:
+				pass
 	else:
+		if conf.certs:
+			cmd += '; rm -f \'{0}\''.format(conf.certs)
 		print('{0} | {1}'.format(pcmd, cmd))
 	return 0
 
