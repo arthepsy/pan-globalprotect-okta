@@ -215,10 +215,11 @@ class Conf(object):
 		if name not in ['okta', 'portal', 'gateway']:
 			raise Exception('unknonw session: {0}'.format(name))
 		s = self._session
+		s.cert = None
 		if name == 'okta':
 			if self.okta_cli_cert:
 				s.cert = self.okta_cli_cert
-		if self.vpn_cli_cert:
+		elif self.vpn_cli_cert:
 			s.cert = self.vpn_cli_cert
 		return s
 
