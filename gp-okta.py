@@ -34,17 +34,17 @@ import requests
 from lxml import etree
 
 if sys.version_info >= (3,):
-	from urllib.parse import urlparse, urljoin
+	from urllib.parse import urlparse, urljoin  # pylint: disable=import-error
 	text_type = str
 	binary_type = bytes
 else:
-	from urlparse import urlparse, urljoin
-	text_type = unicode
+	from urlparse import urlparse, urljoin  # pylint: disable=import-error
+	text_type = unicode  # pylint: disable=undefined-variable
 	binary_type = str
-	input = raw_input
+	input = raw_input  # pylint: disable=undefined-variable,redefined-builtin
 
 try:
-	# from typing import IO, BinaryIO
+	# pylint: disable=unused-import
 	from typing import Any, Dict, List, Union, Tuple
 	from typing import Optional, NoReturn
 except ImportError:
@@ -106,7 +106,6 @@ def to_n(v):
 		return v.decode('utf-8')
 	raise _type_err(v, 'native text')
 
-quiet = False
 
 def log(s):
 	# type: (str) -> None
@@ -185,7 +184,7 @@ def parse_form(html, current_url=None):
 	for xinput in html.findall('.//input'):
 		k = xinput.attrib.get('name', '').strip()
 		v = xinput.attrib.get('value', '').strip()
-		if len(k) > 0 and len(v) > 0:
+		if k and v:
 			data[k] = v
 	return url, data
 
@@ -293,14 +292,14 @@ class Conf(object):
 			k = k.lower()
 			if k.startswith('gp_'):
 				k = k[3:]
-				if len(k) == 0:
+				if not k:
 					continue
 				conf._store[k] = v.strip()
-		if len(conf._store.get('username', '').strip()) == 0:
+		if not conf._store.get('username', '').strip():
 			conf._store['username'] = input('username: ').strip()
-		if len(conf._store.get('password', '').strip()) == 0:
+		if not conf._store.get('password', '').strip():
 			conf._store['password'] = getpass.getpass('password: ').strip()
-		for k in conf._store.keys():
+		for k in conf._store:
 			if not k.endswith('_cert'):
 				continue
 			cert_name = k[:-5]
@@ -315,7 +314,7 @@ class Conf(object):
 			if k not in conf._store:
 				err('missing configuration key: {0}'.format(k))
 			else:
-				if len(conf._store[k].strip()) == 0:
+				if not conf._store[k].strip():
 					err('empty configuration key: {0}'.format(k))
 			if k == 'vpn_url':
 				setattr(conf, k, conf._store[k].strip())
@@ -343,7 +342,7 @@ def mfa_priority(conf, ftype, fprovider):
 	line_nr = conf.get_line('{0}.{1}'.format(ftype, fprovider))
 	if value is None:
 		priority += 0
-	elif len(value) == 0:
+	elif not value:
 		priority += (128 - line_nr)
 	else:
 		priority += (512 - line_nr)
@@ -447,7 +446,7 @@ def paloalto_prelogin(conf, gateway_url=None):
 		else:
 			msg = 'Probably SAML is disabled at the portal? Or you need a certificate? Try another_dance=0 with some concrete gateway instead.'
 		err('did not find saml request.\n{0}'.format(msg))
-	if len(saml_req.text.strip()) == 0:
+	if not saml_req.text.strip():
 		err('empty saml request')
 	try:
 		saml_raw = to_n(base64.b64decode(saml_req.text).decode('ascii'))
@@ -499,10 +498,10 @@ def okta_transaction_state(conf, j):
 	if status == 'password_warn':
 		log('password expiration warning')
 		url = j.get('_links', {}).get('skip', {}).get('href', '').strip()
-		if len(url) == 0:
+		if not url:
 			err('skip url not found')
 		state_token = j.get('stateToken', '').strip()
-		if len(state_token) == 0:
+		if not state_token:
 			err('empty state token')
 		data = {'stateToken': state_token}
 		_, _h, j = send_json_req(conf, 'okta', 'skip', url, data, expected_url=conf.okta_url)
@@ -520,21 +519,21 @@ def okta_transaction_state(conf, j):
 		return False, j
 	# status: mfa_challenge
 	# status: success
-	if status == 'success':
-		session_token = j.get('sessionToken', '').strip()
-		if len(session_token) == 0:
-			err('empty session token')
-		return True, session_token
-	print(j)
-	err('unknown status: {0}'.format(status))
+	if status != 'success':
+		print(j)
+		err('unknown status: {0}'.format(status))
+	session_token = j.get('sessionToken', '').strip()
+	if not session_token:
+		err('empty session token')
+	return True, session_token
 
 def okta_mfa(conf, j):
 	# type: (Conf, Dict[str, Any]) -> Dict[str, Any]
 	state_token = j.get('stateToken', '').strip()
-	if len(state_token) == 0:
+	if not state_token:
 		err('empty state token')
 	factors_json = j.get('_embedded', {}).get('factors', [])
-	if len(factors_json) == 0:
+	if not factors_json:
 		err('no factors found')
 	factors = []
 	for factor in factors_json:
@@ -542,7 +541,7 @@ def okta_mfa(conf, j):
 		factor_type = factor.get('factorType', '').strip().lower()
 		provider = factor.get('provider', '').strip().lower()
 		factor_url = factor.get('_links', {}).get('verify', {}).get('href')
-		if len(factor_type) == 0 or len(provider) == 0 or len(factor_url) == 0:
+		if not factor_type or not provider or not factor_url:
 			continue
 		factors.append({
 			'id': factor_id,
@@ -551,12 +550,12 @@ def okta_mfa(conf, j):
 			'priority': mfa_priority(conf, factor_type, provider),
 			'url': factor_url})
 	dbg(conf.debug, 'factors', *factors)
-	if len(factors) == 0:
+	if not factors:
 		err('no factors found')
+	r = None # type: Optional[Dict[str, Any]]
 	for f in sorted(factors, key=lambda x: x.get('priority', 0), reverse=True):
 		ftype = f.get('type')
 		fprovider = f.get('provider')
-		r = None # type: Optional[Dict[str, Any]]
 		if ftype == 'token:software:totp' or (ftype, fprovider) == ('token', 'symantec'):
 			r = okta_mfa_totp(conf, f, state_token)
 		elif ftype == 'sms':
@@ -566,15 +565,17 @@ def okta_mfa(conf, j):
 		elif ftype == 'webauthn':
 			r = okta_mfa_webauthn(conf, f, state_token)
 		if r is not None:
-			return r
-	err('no factors processed')
+			break
+	if r is None:
+		err('no factors processed')
+	return r
 
 def okta_mfa_totp(conf, factor, state_token):
 	# type: (Conf, Dict[str, str], str) -> Optional[Dict[str, Any]]
 	provider = factor.get('provider', '')
 	secret = conf.get_value('totp.{0}'.format(provider))
 	code = None
-	if len(secret) == 0:
+	if not secret:
 		code = input('{0} TOTP: '.format(provider)).strip()
 	else:
 		if not have_pyotp:
@@ -582,7 +583,7 @@ def okta_mfa_totp(conf, factor, state_token):
 		totp = pyotp.TOTP(secret)
 		code = totp.now()
 	code = code or ''
-	if len(code) == 0:
+	if not code:
 		return None
 	data = {
 		'factorId': factor.get('id'),
@@ -603,7 +604,7 @@ def okta_mfa_sms(conf, factor, state_token):
 	log('mfa {0} sms request [okta_url]'.format(provider))
 	_, _h, j = send_json_req(conf, 'okta', 'sms mfa (1)', factor.get('url', ''), data, expected_url=conf.okta_url)
 	code = input('{0} SMS verification code: '.format(provider)).strip()
-	if len(code) == 0:
+	if not code:
 		return None
 	data['passCode'] = code
 	log('mfa {0} sms request [okta_url]'.format(provider))
@@ -757,7 +758,7 @@ def paloalto_getconfig(conf, username=None, prelogin_cookie=None, can_fail=False
 	if xtmp is None:
 		err('did not find portal-userauthcookie')
 	portal_userauthcookie = xtmp.text
-	if len(portal_userauthcookie) == 0:
+	if not portal_userauthcookie:
 		err('empty portal_userauthcookie')
 	gateways = {}
 	xtmp = x.find('.//gateways//external//list')
@@ -786,10 +787,10 @@ def okta_saml_2(conf, gateway_url, saml_xml):
 	log('okta redirect form request (2) [gateway]')
 	_, h, c = send_req(conf, 'gateway', 'okta redirect form (2)', url, data, expected_url=gateway_url)
 	saml_username = h.get('saml-username', '').strip()
-	if len(saml_username) == 0:
+	if not saml_username:
 		err('saml-username empty')
 	prelogin_cookie = h.get('prelogin-cookie', '').strip()
-	if len(prelogin_cookie) == 0:
+	if not prelogin_cookie:
 		err('prelogin-cookie empty')
 	return saml_username, prelogin_cookie
 
@@ -803,7 +804,7 @@ def choose_gateway_url(conf, gateways):
 	# type: (Conf, Dict[str, str]) -> str
 	if conf.gateway_url:
 		return conf.gateway_url
-	if len(gateways) == 0:
+	if not gateways:
 		err('no available gateways')
 	gateway_name = conf.gateway
 	gateway_host = None
@@ -847,7 +848,7 @@ def run_openconnect(conf, do_portal_auth, urls, saml_username, cookies):
 	pfmt = pfmt.replace('<cookie>', cookie + '\\n')
 	for k in ['username', 'password', 'gateway', 'gateway_url']:
 		v = conf.get_value(k).strip()
-		pfmt = pfmt.replace('<{0}>'.format(k), v + '\\n' if len(v) > 0 else '')
+		pfmt = pfmt.replace('<{0}>'.format(k), v + '\\n' if v else '')
 	pfmt = pfmt.replace('<saml_username>', saml_username + '\\n')
 	if rmnl and pfmt.endswith('\\n'):
 		pfmt = pfmt[:-2]
@@ -978,6 +979,6 @@ def main():
 		saml_username,
 		{'userauthcookie': userauthcookie or '', 'prelogin-cookie': prelogin_cookie})
 
-
+quiet = False
 if __name__ == '__main__':
 	sys.exit(main())
