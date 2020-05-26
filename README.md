@@ -1,7 +1,7 @@
 # pan-globalprotect-okta
 
 Command-line client for PaloAlto Networks' GlobalProtect VPN, integrated with OKTA.
-This utility will do the _authentication dance_ with OKTA to retrieve `portal-userauthcookie`,
+This utility will do the _authentication dance_ with OKTA to retrieve cookie,
 which will be passed to [OpenConnect](https://github.com/openconnect/openconnect)
 for creating actual VPN connection. Compatible with Python 2 and 3. Tested on
 FreeBSD, Linux and MacOS X. Tested with OpenConnect 8.00 - 8.10.
@@ -44,12 +44,13 @@ override `password` option in configuration file.
 
 ## changelog
 ### v1.00 (2020-05-xx)
-- supported MFA: push, Symantec, WebAuthN/YubiKey
-- support second authentication dance
-- support using client certificate
+- new MFA: push, Symantec, WebAuthN/YubiKey
+- GnuGP config encryption
+- direct gateway authentication
+- second authentication dance
+- use client certificates
 - verify server certificates
-- auto-detect openconnect version
-- ability to specify pipe format manually
+- type checking
 
 ### v0.99 (2019-02-14)
 - supported MFA: OKTA, Google, SMS
