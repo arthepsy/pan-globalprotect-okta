@@ -29,11 +29,9 @@
    THE SOFTWARE.
 """
 from __future__ import print_function
-import io, os, sys, time, re, json, base64, getpass, subprocess, shlex, signal, tempfile, traceback
-
-from lxml import etree
+import argparse, base64, getpass, io, os, re, shlex, signal, subprocess, sys, tempfile, time, traceback
 import requests
-import argparse
+from lxml import etree
 
 if sys.version_info >= (3,):
 	from urllib.parse import urlparse, urljoin
@@ -876,22 +874,23 @@ def run_openconnect(conf, do_portal_auth, urls, saml_username, cookies):
 		print('{0} | {1}'.format(pcmd, cmd))
 	return 0
 
+def parse_args():
+	# type: () -> argparse.Namespace
+	parser = argparse.ArgumentParser(description="""
+	This is an OpenConnect wrapper script that automates connecting
+	to PaloAlto Networks GlobalProtect VPN using Okta 2FA.""")
+
+	parser.add_argument('conf_file', help='e.g. ~/.config/gp-okta.conf')
+	parser.add_argument('-l', '--list-gateways', default=False, action='store_true', help='get list of gateways from portal')
+	parser.add_argument('-d', '--gpg-decrypt', action='store_true', help='decrypt configuration file with gpg')
+	parser.add_argument('--gpg-home', default=os.path.expanduser('~/.gnupg'), help='path to gpg home directory')
+	parser.add_argument('-q', '--quiet', default=False, action='store_true', help='disable verbose logging')
+	args = parser.parse_args()
+	return args
+
 def main():
 	# type: () -> int
-	parser = argparse.ArgumentParser(description="""
-	This is an OpenConnect wrapper script that automates connecting to a
-	PaloAlto Networks GlobalProtect VPN using Okta 2FA.""")
-
-	parser.add_argument('conf_file',
-		help='e.g. ~/.config/gp-okta.conf')
-	parser.add_argument('--gpg-decrypt', action='store_true',
-		help='use gpg and settings from gpg-home to decrypt gpg encrypted conf_file')
-	parser.add_argument('--gpg-home', default=os.path.expanduser('~/.gnupg'))
-	parser.add_argument('--list-gateways', default=False, action='store_true',
-		help='get list of gateways from portal')
-	parser.add_argument('--quiet', default=False, action='store_true',
-		help='disable verbose logging')
-	args = parser.parse_args()
+	args = parse_args()
 
 	global quiet
 	quiet = args.quiet
