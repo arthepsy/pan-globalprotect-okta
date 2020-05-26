@@ -76,6 +76,8 @@ try:
 except ImportError:
 	pass
 
+quiet = False
+
 def _type_err(v, target):
 	# type: (Any, text_type) -> TypeError
 	return TypeError('cannot convert {0} to {1}'.format(type(v), target))
@@ -889,6 +891,28 @@ def parse_args():
 	args = parser.parse_args()
 	return args
 
+def read_conf(fp, gpg_decrypt, gpg_home):
+	# type: (str, bool, str) -> str
+	if not os.path.exists(fp):
+		err('config file "{0}" does not exist'.format(fp))
+	cc = ''
+	with io.open(fp, 'rb') as fh:
+		cc = fh.read()
+	if fp.lower().endswith('.gpg') and not gpg_decrypt:
+		gpg_decrypt = True
+		log('conf file looks like gpg encrypted. trying decryption')
+	if gpg_decrypt:
+		if not os.path.isdir(gpg_home):
+			err('invalid gpg home directory: "{0}"'.format(gpg_home))
+		if not have_gnupg:
+			err('Need gnupg package for reading gnupg encrypted files. Consider doing `pip install python-gnupg` (or similar)')
+		gpg = gnupg.GPG(gnupghome=gpg_home)
+		dc = gpg.decrypt(cc)
+		if not dc.ok:
+			err('failed to decrypt config file. status: {0}, error:\n {1}'.format(dc.status, dc.stderr))
+		cc = dc.data
+	return cc
+
 def main():
 	# type: () -> int
 	args = parse_args()
@@ -896,31 +920,9 @@ def main():
 	global quiet
 	quiet = args.quiet
 
-	assert os.path.exists(args.conf_file)
-	assert not args.gpg_decrypt or os.path.isdir(args.gpg_home)
 
-	config_contents = ''
-	with io.open(args.conf_file, 'rb') as fp:
-		config_contents = fp.read()
-
-	if args.conf_file.endswith('.gpg') and not args.gpg_decrypt:
-		err('conf file looks like gpg encrypted. Did you forget the --gpg-decrypt?')
-
-	if args.gpg_decrypt:
-		if not have_gnupg:
-			err('Need gnupg package for reading gnupg encrypted files. Consider doing `pip install python-gnupg` (or similar)')
-		gpg = gnupg.GPG(gnupghome=args.gpg_home)
-		decrypted_contents = gpg.decrypt(config_contents)
-
-		if not decrypted_contents.ok:
-			print('[ERROR] failed to decrypt config file:', file=sys.stderr)
-			print('[ERROR]     status: {}'.format(decrypted_contents.status), file=sys.stderr)
-			print('[ERROR]     error: {}'.format(decrypted_contents.stderr), file=sys.stderr)
-			sys.exit(1)
-
-		config_contents = decrypted_contents.data
-
-	conf = Conf.from_data(config_contents)
+	conf_data = read_conf(args.conf_file, args.gpg_decrypt, args.gpg_home)
+	conf = Conf.from_data(conf_data)
 
 	if args.list_gateways:
 		log('listing gateways')
@@ -979,6 +981,6 @@ def main():
 		saml_username,
 		{'userauthcookie': userauthcookie or '', 'prelogin-cookie': prelogin_cookie})
 
-quiet = False
+
 if __name__ == '__main__':
 	sys.exit(main())
