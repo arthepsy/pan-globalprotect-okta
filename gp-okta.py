@@ -238,7 +238,6 @@ class Conf(object):
 		if not cert:
 			return
 		if name in ['vpn_cli', 'okta_cli', 'okta_url']:
-			log('dropping {0} cert'.format(name))
 			return
 		if name != 'vpn_url':
 			self._ocerts = True
@@ -259,9 +258,9 @@ class Conf(object):
 			raise Exception('unknonw verify request: {0}'.format(name))
 		if name == 'okta' and 'okta_url_cert' in self._store:
 			return self._store['okta_url_cert']
-		elif name == 'portal' and 'vpn_url_cert' in self._store:
+		if name == 'portal' and 'vpn_url_cert' in self._store:
 			return self._store['vpn_url_cert']
-		elif name == 'gateway' and self._ocerts:
+		if name == 'gateway' and self._ocerts:
 			return self.certs
 		return default_verify
 	
@@ -683,8 +682,8 @@ def okta_mfa_webauthn(conf, factor, state_token):
 		expected_url=conf.okta_url)
 	return j
 
-def okta_redirect(conf, session_token, redirect_url):
-	# type: (Conf, str, str) -> Tuple[str, str]
+def okta_redirect(conf, session_token, redirect_url, gateway_url=None):
+	# type: (Conf, str, str, Optional[str]) -> Tuple[str, str]
 	rc = 0
 	form_url = None # type: Optional[str]
 	form_data = {} # type: Dict[str, str]
@@ -715,15 +714,20 @@ def okta_redirect(conf, session_token, redirect_url):
 				log('stateToken: {0}'.format(state_token))
 				okta_auth(conf, state_token)
 		elif form_url:
-			log('okta redirect form request [vpn_url]')
-			purl, pexp = parse_url(form_url), parse_url(conf.vpn_url)
-			if purl != pexp:
-				# NOTE: redirect to nearest (geo) gateway without any prior knowledge
-				warn('{0}: unexpected url found {1} != {2}'.format('redirect form', purl, pexp))
-				_, h, c = send_req(conf, 'gateway', 'redirect form', form_url, form_data)
+			if gateway_url:
+				log('okta redirect form request [gateway]')
+				dest = 'gateway'
+				expected_url = gateway_url # type: Optional[str]
 			else:
-				_, h, c = send_req(conf, 'portal', 'redirect form', form_url, form_data,
-					expected_url=conf.vpn_url)
+				log('okta redirect form request [vpn_url]')
+				dest = 'portal'
+				expected_url = conf.vpn_url
+				purl, pexp = parse_url(form_url), parse_url(expected_url)
+				if purl != pexp:
+					# NOTE: redirect to nearest (geo) portal without any prior knowledge
+					warn('{0}: unexpected url found {1} != {2}'.format('redirect form', purl, pexp))
+					expected_url = None
+			_, h, c = send_req(conf, dest, 'redirect form', form_url, form_data, expected_url=expected_url)
 		saml_username = h.get('saml-username', '').strip()
 		prelogin_cookie = h.get('prelogin-cookie', '').strip()
 		if saml_username and prelogin_cookie:
@@ -824,6 +828,64 @@ def choose_gateway_url(conf, gateways):
 		gateway_host = next(iter(gateways))
 	return 'https://{0}'.format(gateway_host)
 
+def run_openconnect(conf, do_portal_auth, urls, saml_username, cookies):
+	# type: (Conf, bool, Dict[str, str], str, Dict[str, str]) -> int
+	if do_portal_auth:
+	    url = urls.get('portal')
+	    cookie_type = 'portal:portal-userauthcookie'
+	    cookie = cookies.get('userauthcookie')
+	else:
+	    url = urls.get('gateway')
+	    cookie_type = 'gateway:prelogin-cookie'
+	    cookie = cookies.get('prelogin-cookie')
+	if cookie is None or cookie == 'empty':
+		err('empty "{0}" cookie'.format(cookie_type))
+
+	cmd = conf.openconnect_cmd or 'openconnect'
+	cmd += ' --protocol=gp -u \'{0}\''.format(saml_username)
+	if do_portal_auth and conf.gateway:
+		cmd += ' --authgroup=\'{0}\''.format(conf.gateway)
+	cmd += ' --usergroup {0}'.format(cookie_type)
+	if conf.vpn_cli_cert:
+		cmd += ' --certificate=\'{0}\''.format(conf.vpn_cli_cert)
+	if conf.certs:
+		cmd += ' --cafile=\'{0}\''.format(conf.certs)
+	cmd += ' --passwd-on-stdin ' + conf.openconnect_args + ' \'{0}\''.format(url)
+
+	pfmt = conf.openconnect_fmt
+	if not pfmt:
+		pfmt = '<cookie><cookie>' if do_portal_auth else '<cookie>'
+	rmnl = pfmt.endswith('>')
+	pfmt = pfmt.replace('<cookie>', cookie + '\\n')
+	for k in ['username', 'password', 'gateway', 'gateway_url']:
+		v = conf.get_value(k).strip()
+		pfmt = pfmt.replace('<{0}>'.format(k), v + '\\n' if len(v) > 0 else '')
+	pfmt = pfmt.replace('<saml_username>', saml_username + '\\n')
+	if rmnl and pfmt.endswith('\\n'):
+		pfmt = pfmt[:-2]
+	pcmd = 'printf \'{0}\''.format(pfmt)
+
+	print()
+	if conf.get_bool('execute'):
+		ecmd = [os.path.expandvars(os.path.expanduser(x)) for x in shlex.split(cmd)]
+		pp = subprocess.Popen(shlex.split(pcmd), stdout=subprocess.PIPE)
+		cp = subprocess.Popen(ecmd, stdin=pp.stdout, stdout=sys.stdout)
+		if pp.stdout is not None:
+			pp.stdout.close()
+		# Do not abort on SIGINT. openconnect will perform proper exit & cleanup
+		signal.signal(signal.SIGINT, signal.SIG_IGN)
+		cp.communicate()
+		if conf.certs:
+			try:
+				os.unlink(conf.certs)
+			except Exception:
+				pass
+	else:
+		if conf.certs:
+			cmd += '; rm -f \'{0}\''.format(conf.certs)
+		print('{0} | {1}'.format(pcmd, cmd))
+	return 0
+
 def main():
 	# type: () -> int
 	parser = argparse.ArgumentParser(description="""
@@ -878,19 +940,12 @@ def main():
 			return 0
 		log('gateway list requires authentication')
 
-	another_dance = conf.another_dance.lower() in ['1', 'true']
+	another_dance = conf.get_bool('another_dance')
 	gateway_url = conf.gateway_url
-	gateway_name = conf.gateway
+	do_portal_login = another_dance or not gateway_url
+	do_portal_auth = not gateway_url
 
-	if gateway_url and not another_dance:
-		vpn_url = gateway_url
-		if vpn_url != conf.vpn_url:
-			log('Discarding \'vpn_url\', as concrete \'gateway_url\' is given and another_dance = 0')
-			conf.vpn_url = vpn_url
-
-	userauthcookie = None
-
-	if another_dance or not gateway_url:
+	if do_portal_login or args.list_gateways:
 		saml_xml = paloalto_prelogin(conf)
 	else:
 		saml_xml = paloalto_prelogin(conf, gateway_url)
@@ -898,17 +953,21 @@ def main():
 	redirect_url = okta_saml(conf, saml_xml)
 	token = okta_auth(conf)
 	log('sessionToken: {0}'.format(token))
-	saml_username, prelogin_cookie = okta_redirect(conf, token, redirect_url)
-	if args.list_gateways:
-		log('listing gateways')
-		sc, _, gateways = paloalto_getconfig(conf, saml_username, prelogin_cookie)
-		if sc == 200:
-			output_gateways(gateways)
-			return 0
-		err('could not list gateways')
+	if do_portal_login:
+		saml_username, prelogin_cookie = okta_redirect(conf, token, redirect_url)
+	else:
+		saml_username, prelogin_cookie = okta_redirect(conf, token, redirect_url, gateway_url)
 
-	if another_dance or not gateway_url:
-		_, userauthcookie, gateways = paloalto_getconfig(conf, saml_username, prelogin_cookie)
+	userauthcookie = None
+	if do_portal_login or args.list_gateways:
+		if args.list_gateways:
+			log('listing gateways')
+		sc, userauthcookie, gateways = paloalto_getconfig(conf, saml_username, prelogin_cookie, can_fail=args.list_gateways)
+		if args.list_gateways:
+			if sc == 200:
+				output_gateways(gateways)
+				return 0
+			err('could not list gateways')
 		gateway_url = choose_gateway_url(conf, gateways)
 
 	log('portal-userauthcookie: {0}'.format(userauthcookie))
@@ -922,63 +981,13 @@ def main():
 		saml_username, prelogin_cookie = okta_saml_2(conf, gateway_url, saml_xml)
 		log('saml-username (2): {0}'.format(saml_username))
 		log('prelogin-cookie (2): {0}'.format(prelogin_cookie))
+		do_portal_auth = False
 
-	if (not userauthcookie or userauthcookie == 'empty') and prelogin_cookie != 'empty':
-	    cookie_type = 'gateway:prelogin-cookie'
-	    cookie = prelogin_cookie
-	else:
-	    cookie_type = 'portal:portal-userauthcookie'
-	    cookie = userauthcookie or ''
-
-	username = saml_username
-
-	cmd = conf.openconnect_cmd or 'openconnect'
-	cmd += ' --protocol=gp -u \'{0}\''
-	if gateway_name:
-		cmd += ' --authgroup=\'{0}\''.format(gateway_name)
-	cmd += ' --usergroup {1}'
-	if conf.vpn_cli_cert:
-		cmd += ' --certificate=\'{0}\''.format(conf.vpn_cli_cert)
-	if conf.certs:
-		cmd += ' --cafile=\'{0}\''.format(conf.certs)
-	cmd += ' --passwd-on-stdin ' + conf.openconnect_args + ' \'{2}\''
-	cmd = cmd.format(username, cookie_type,
-		gateway_url if conf.get_bool('another_dance') else conf.vpn_url)
-
-	pfmt = conf.openconnect_fmt
-	if not pfmt:
-		pfmt = '<cookie><cookie>'
-	rmnl = pfmt.endswith('>')
-	pfmt = pfmt.replace('<cookie>', cookie + '\\n')
-	pfmt = pfmt.replace('<gateway>', gateway_name + '\\n' if len(gateway_name) > 0 else '')
-	for k in ['username', 'password', 'gateway_url']:
-		v = conf.get_value(k).strip()
-		pfmt = pfmt.replace('<{0}>'.format(k), v + '\\n' if len(v) > 0 else '')
-	pfmt = pfmt.replace('<saml_username>', saml_username + '\\n')
-	if rmnl and pfmt.endswith('\\n'):
-		pfmt = pfmt[:-2]
-	pcmd = 'printf \'{0}\''.format(pfmt)
-
-	print()
-	if conf.get_bool('execute'):
-		ecmd = [os.path.expandvars(os.path.expanduser(x)) for x in shlex.split(cmd)]
-		pp = subprocess.Popen(shlex.split(pcmd), stdout=subprocess.PIPE)
-		cp = subprocess.Popen(ecmd, stdin=pp.stdout, stdout=sys.stdout)
-		if pp.stdout is not None:
-			pp.stdout.close()
-		# Do not abort on SIGINT. openconnect will perform proper exit & cleanup
-		signal.signal(signal.SIGINT, signal.SIG_IGN)
-		cp.communicate()
-		if conf.certs:
-			try:
-				os.unlink(conf.certs)
-			except Exception:
-				pass
-	else:
-		if conf.certs:
-			cmd += '; rm -f \'{0}\''.format(conf.certs)
-		print('{0} | {1}'.format(pcmd, cmd))
-	return 0
+	return run_openconnect(
+		conf, do_portal_auth,
+		{'portal': conf.vpn_url, 'gateway': gateway_url},
+		saml_username,
+		{'userauthcookie': userauthcookie or '', 'prelogin-cookie': prelogin_cookie})
 
 
 if __name__ == '__main__':
