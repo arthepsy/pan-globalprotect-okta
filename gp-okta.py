@@ -578,7 +578,9 @@ def okta_mfa_totp(conf, factor, state_token):
 	secret = conf.get_value('totp.{0}'.format(provider))
 	code = None
 	if not secret:
-		code = input('{0} TOTP: '.format(provider)).strip()
+		code = conf.get_value('totp_code')
+		if not code:
+			code = input('{0} TOTP: '.format(provider)).strip()
 	else:
 		if not have_pyotp:
 			err('Need pyotp package, consider doing \'pip install pyotp\' (or similar)')
@@ -863,8 +865,10 @@ def run_openconnect(conf, do_portal_auth, urls, saml_username, cookies):
 		cp = subprocess.Popen(ecmd, stdin=pp.stdout, stdout=sys.stdout)
 		if pp.stdout is not None:
 			pp.stdout.close()
-		# Do not abort on SIGINT. openconnect will perform proper exit & cleanup
-		signal.signal(signal.SIGINT, signal.SIG_IGN)
+		# Do not abort on SIGINT or SIGTERM; pass signal to openconnect so
+		# it can perform proper exit & cleanup
+		signal.signal(signal.SIGINT, lambda signum, frame: cp.terminate())
+		signal.signal(signal.SIGTERM, lambda signum, frame: cp.terminate())
 		cp.communicate()
 		if conf.certs:
 			try:
