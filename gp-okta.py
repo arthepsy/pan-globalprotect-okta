@@ -2,19 +2,19 @@
 # -*- coding: utf-8 -*-
 """
    The MIT License (MIT)
-   
+
    Copyright (C) 2018 Andris Raugulis (moo@arthepsy.eu)
-   
+
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
    in the Software without restriction, including without limitation the rights
    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
    copies of the Software, and to permit persons to whom the Software is
    furnished to do so, subject to the following conditions:
-   
+
    The above copyright notice and this permission notice shall be included in
    all copies or substantial portions of the Software.
-   
+
    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -420,7 +420,7 @@ def main():
 		print('usage: {0} <conf>'.format(sys.argv[0]))
 		sys.exit(1)
 	conf = load_conf(sys.argv[1])
-	
+
 	s = requests.Session()
 	s.headers['User-Agent'] = 'PAN GlobalProtect'
 	saml_xml = paloalto_prelogin(conf, s)
@@ -432,7 +432,7 @@ def main():
 	log('prelogin-cookie: {0}'.format(prelogin_cookie))
 	userauthcookie = paloalto_getconfig(conf, s, saml_username, prelogin_cookie)
 	log('portal-userauthcookie: {0}'.format(userauthcookie))
-	
+
 	username = saml_username
 	cmd = conf.get('openconnect_cmd') or 'openconnect'
 	cmd += ' --protocol=gp -u \'{0}\''
@@ -446,13 +446,14 @@ def main():
 	if conf.get('bug.username', '').lower() in ['1', 'true']:
 		bugs += '{0}\\n'.format(username.replace('\\', '\\\\'))
 	if len(gw) > 0:
-		pcmd = 'printf \'' + bugs + '{0}\\n{1}\''.format(userauthcookie, gw)
+		pcmd = 'printf \'' + bugs + '{1}\\n{0}\''.format(userauthcookie, gw)
 	else:
 		pcmd = 'printf \'' + bugs + '{0}\''.format(userauthcookie)
 	print()
 	if conf.get('execute', '').lower() in ['1', 'true']:
 		cmd = shlex.split(cmd)
 		cmd = [os.path.expandvars(os.path.expanduser(x)) for x in cmd]
+		log('{0} | {1}'.format(pcmd, cmd))
 		pp = subprocess.Popen(shlex.split(pcmd), stdout=subprocess.PIPE)
 		cp = subprocess.Popen(cmd, stdin=pp.stdout, stdout=sys.stdout)
 		pp.stdout.close()
