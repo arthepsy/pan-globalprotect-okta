@@ -1,1 +1,7 @@
-sudo openconnect --protocol=gp -u rick.cobb@grandrounds.com --usergroup portal:portal-userauthcookie --passwd-on-stdin --csd-wrapper /usr/lib/x86_64-linux-gnu/openconnect/hipreport.sh https://grandrounds.gpcloudservice.com
+sudo openconnect \
+  --protocol=gp \
+  -u rick.cobb@grandrounds.com \
+  --usergroup portal:portal-userauthcookie \
+  --passwd-on-stdin \
+  --csd-wrapper /usr/lib/x86_64-linux-gnu/openconnect/hipreport.sh \
+  https://grandrounds.gpcloudservice.com
