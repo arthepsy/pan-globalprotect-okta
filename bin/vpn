@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+GP_USERNAME=${GR_USERNAME:?"Must add GR_USERNAME to .localrc"}
+GP_GATEWAY=${GP_GATEWAY:-"US West"}
+
+GP_PASSWORD_STORE_PATH="$HOME/.globalprotect-password.gpg"
+GP_PASSWORD=
+[[ -f "${GP_PASSWORD_STORE_PATH}" ]] && GP_PASSWORD=$(gpg -dq "$GP_PASSWORD_STORE_PATH")
+if [[ -z "${GP_PASSWORD}" ]]; then
+    read -s -p "GP Password: " GP_PASSWORD
+    echo "INFO: storing GP Password in encrypted file: ${GP_PASSWORD_STORE_PATH}"
+    echo "$GP_PASSWORD" | gpg -e -r "$GR_GPGKEY_ADDRESS" > "$GP_PASSWORD_STORE_PATH"
+fi
+
+PAN_GLOBALPROTECT_OKTA="$GR_HOME/pan-globalprotect-okta"
+GP_OPENCONNECT_ARGS="--csd-wrapper $PAN_GLOBALPROTECT_OKTA/hipreport.sh"
+# default to totp, can override with GP_MFA_ORDER="webauthn" to use a yubikey
+GP_MFA_ORDER=${GP_MFA_ORDER:-"totp"}
+
+export GP_PASSWORD GP_GATEWAY GP_USERNAME
+exec python3 "$PAN_GLOBALPROTECT_OKTA/gp-okta.py" "$PAN_GLOBALPROTECT_OKTA/gp-okta.conf"

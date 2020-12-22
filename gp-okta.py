@@ -657,7 +657,7 @@ def okta_mfa_webauthn(conf, factor, state_token):
 		print('!!! Touch the flashing U2F device to authenticate... !!!')
 		try:
 			result = client.get_assertion(purl[1], challenge, allow_list)
-			dbg(conf.debug, 'assertion.result', result)
+			# dbg(conf.debug, 'assertion.result', result)
 			break
 		except Exception:
 			traceback.print_exc(file=sys.stderr)
