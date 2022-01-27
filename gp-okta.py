@@ -9,6 +9,7 @@
    Copyright (C) 2019 Taylor Dean (taylor@makeshift.dev)
    Copyright (C) 2020 Max Lanin (mlanin@evolutiongaming.com)
    Copyright (C) 2019-2020 Tino Lange (coldcoff@yahoo.com)
+   Copyright (C) 2022 David Keijser (keijser@gmail.com)
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +57,7 @@ try:
 	from fido2.utils import websafe_decode
 	from fido2.hid import CtapHidDevice
 	from fido2.client import Fido2Client
+	from fido2.webauthn import PublicKeyCredentialRequestOptions, PublicKeyCredentialDescriptor, PublicKeyCredentialType
 	have_fido = True
 except ImportError:
 	pass
@@ -657,27 +659,35 @@ def okta_mfa_webauthn(conf, factor, state_token):
 	profile = rfactor['profile']
 	purl = parse_url(conf.okta_url)
 	origin = '{0}://{1}'.format(purl[0], purl[1])
-	challenge = rfactor['_embedded']['challenge']['challenge']
 	credentialId = websafe_decode(profile['credentialId'])
 	allow_list = [{'type': 'public-key', 'id': credentialId}]
+	request_options = PublicKeyCredentialRequestOptions(
+		challenge = websafe_decode(rfactor['_embedded']['challenge']['challenge']),
+		rp_id = purl[1],
+		allow_credentials = [
+			PublicKeyCredentialDescriptor(
+				PublicKeyCredentialType.PUBLIC_KEY,
+				websafe_decode(profile['credentialId']))
+		]
+	)
 	for dev in devices:
 		client = Fido2Client(dev, origin)
 		print('!!! Touch the flashing U2F device to authenticate... !!!')
 		try:
-			result = client.get_assertion(purl[1], challenge, allow_list)
-			dbg(conf.debug, 'assertion.result', result)
+			result = client.get_assertion(request_options)
+			dbg(conf.debug, 'assertion.result', vars(result))
 			break
 		except Exception:
 			traceback.print_exc(file=sys.stderr)
 			result = None
 	if not result:
 		return None
-	assertion, client_data = result[0][0], result[1] # only one cred in allowList, so only one response.
+	response = result.get_response(0)  # only one cred in allowList, so only one response.
 	data = {
 		'stateToken': state_token,
-		'clientData': to_n((base64.b64encode(client_data)).decode('ascii')),
-		'signatureData': to_n((base64.b64encode(assertion.signature)).decode('ascii')),
-		'authenticatorData': to_n((base64.b64encode(assertion.auth_data)).decode('ascii'))
+		'clientData': to_n((base64.b64encode(response.client_data)).decode('ascii')),
+		'signatureData': to_n((base64.b64encode(response.signature)).decode('ascii')),
+		'authenticatorData': to_n((base64.b64encode(response.authenticator_data)).decode('ascii'))
 	}
 	log('mfa {0} signature request [okta_url]'.format(provider))
 	_, _h, j = send_json_req(conf, 'okta', 'uf2 mfa signature', j['_links']['next']['href'], data, expected_url=conf.okta_url)
