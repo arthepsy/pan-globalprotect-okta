@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
    The MIT License (MIT)
@@ -29,7 +29,7 @@
    THE SOFTWARE.
 """
 from __future__ import print_function
-import argparse, base64, getpass, io, os, re, shlex, signal, subprocess, sys, tempfile, time, traceback
+import argparse, base64, getpass, io, os, re, shlex, signal, subprocess, sys, tempfile, time
 import requests
 from lxml import etree
 
@@ -54,8 +54,12 @@ except ImportError:
 have_fido = False
 try:
 	from fido2.utils import websafe_decode
-	from fido2.hid import CtapHidDevice
-	from fido2.client import Fido2Client
+	from fido2.hid import CtapHidDevice, STATUS
+	from fido2.client import Fido2Client, ClientError
+	from fido2.webauthn import PublicKeyCredentialCreationOptions, \
+		PublicKeyCredentialType, PublicKeyCredentialParameters, PublicKeyCredentialDescriptor, UserVerificationRequirement, PublicKeyCredentialRequestOptions
+	from ctap_keyring_device.ctap_keyring_device import CtapKeyringDevice
+	from ctap_keyring_device.ctap_strucs import CtapOptions
 	have_fido = True
 except ImportError:
 	pass
@@ -632,6 +636,29 @@ def okta_mfa_push(conf, factor, state_token):
 		counter += 1
 	return j
 
+def get_user_verification_requirement_from_client(client):
+	if not client.info.options.get(CtapOptions.USER_VERIFICATION):
+		return None
+
+	return UserVerificationRequirement.PREFERRED
+
+def get_pin_from_client(client):
+	if not client.info.options.get(CtapOptions.CLIENT_PIN):
+		return None
+
+	# Prompt for PIN if needed
+	pin = getpass("Please enter PIN: ")
+	return pin
+
+class KeepAlive(object):
+	def __init__(self):
+		self._has_prompted = False
+
+	def on_keepalive(self, status):
+		if status == STATUS.UPNEEDED and not self._has_prompted:
+			print('\nTouch your authenticator device now...\n')
+			self._has_prompted = True
+
 def okta_mfa_webauthn(conf, factor, state_token):
 	# type: (Conf, Dict[str, str], str) -> Optional[Dict[str, Any]]
 	if not have_fido:
@@ -654,17 +681,31 @@ def okta_mfa_webauthn(conf, factor, state_token):
 	allow_list = [{'type': 'public-key', 'id': credentialId}]
 	for dev in devices:
 		client = Fido2Client(dev, origin)
-		print('!!! Touch the flashing U2F device to authenticate... !!!')
+		user_verification = get_user_verification_requirement_from_client(client)
+		options = PublicKeyCredentialRequestOptions(challenge=websafe_decode(challenge), rp_id=purl[1],
+				allow_credentials=allow_list, timeout=30_000,
+                                user_verification=user_verification)
+		pin = get_pin_from_client(client)
 		try:
-			result = client.get_assertion(purl[1], challenge, allow_list)
+			keepalive=KeepAlive()
+			result = client.get_assertion(options, on_keepalive=keepalive.on_keepalive, pin=pin)
+			assertions = result.get_assertions()
+			assert len(assertions) >= 0
 			dbg(conf.debug, 'assertion.result', result)
-			break
-		except Exception:
-			traceback.print_exc(file=sys.stderr)
-			result = None
+		except ClientError as e:
+			if e.code == ClientError.ERR.DEVICE_INELIGIBLE:
+				return
+			elif e.code != ClientError.ERR.TIMEOUT:
+				raise
+			else:
+				return
 	if not result:
 		return None
-	assertion, client_data = result[0][0], result[1] # only one cred in allowList, so only one response.
+	assertion_res = result.get_response(0)
+	assertions = result.get_assertions()
+	client_data = assertion_res.client_data
+	assertion = assertions[0]
+
 	data = {
 		'stateToken': state_token,
 		'clientData': to_n((base64.b64encode(client_data)).decode('ascii')),
