@@ -335,7 +335,7 @@ def mfa_priority(conf, ftype, fprovider):
 		ftype = 'totp'
 	if ftype not in ['totp', 'sms', 'push', 'webauthn']:
 		return 0
-	mfa_order = conf.mfa_order.split()
+	mfa_order = (conf.mfa_order or 'totp sms push webauthn').split()
 	if ftype in mfa_order:
 		priority = (10 - mfa_order.index(ftype)) * 100
 	else:
@@ -804,6 +804,193 @@ def okta_saml_2(conf, gateway_url, saml_xml):
 		err('prelogin-cookie empty')
 	return saml_username, prelogin_cookie
 
+def okta_oie_parse_response(conf, j):
+	state_handle = j.get('stateHandle')
+	dbg(conf.debug, 'stateHandle: {0}'.format(state_handle))
+	if not state_handle:
+		err('missing stateHandle in response')
+	rem = j.get('remediation')
+	if not rem:
+		err('no remediation in response')
+	if rem.get('type') != 'array':
+		err('remediation in response is not array')
+	return state_handle, rem
+
+def okta_oie_response_lookup(j, sk, k, v):
+	for sj in j.get(sk, []):
+		if sj.get(k) == v:
+			return sj
+	err('no "{0}" found as "{1}" in "{2}" items'.format(v, k, sk))
+
+def okta_oie_mfa_totp(conf, state_handle, mfa, rem):
+	rem_ca = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-authenticator')
+	provider = mfa.get('provider', '')
+	secret = conf.get_value('totp.{0}'.format(provider))
+	code = None
+	if not secret:
+		code = input('{0} TOTP: '.format(provider)).strip()
+	else:
+		if not have_pyotp:
+			err('Need pyotp package, consider doing \'pip install pyotp\' (or similar)')
+		totp = pyotp.TOTP(secret)
+		code = totp.now()
+	code = code or ''
+	if not code:
+		return None
+
+	log('mfa {0} totp request: {1} [okta_url]'.format(mfa.get('provider'), code))
+	data = {'stateHandle': state_handle, 'credentials':{'passcode': code}}
+	url = '{0}/idp/idx/challenge/answer'.format(conf.okta_url)
+	_, h, j = send_json_req(conf, 'okta', 'idp/idx/challenge/answer', url, data)
+
+	success = j.get('success')
+	if success:
+		return success.get('href')
+	return None
+
+def okta_oie_mfa_push(conf, state_handle, mfa, rem):
+	rem_cp = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-poll')
+	c = 0
+	while True:
+		if c > 10:
+			err('waiting for push notification too long')
+		log('mfa poll for push notification [okta_url]')
+		data = {'stateHandle': state_handle}
+		url = '{0}/idp/idx/authenticators/poll'.format(conf.okta_url)
+		_, h, j = send_json_req(conf, 'okta', 'idp/idx/authenticators/poll', url, data)
+		state_handle = j.get('stateHandle')
+		success = j.get('success')
+		if success:
+			return success.get('href')
+		time.sleep(4)
+		c += 1
+
+def okta_oie_mfa_sms(conf, state_handle, mfa, rem):
+	rem_ca = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-authenticator')
+	code = input('SMS verification code: ').strip()
+	log('mfa sms request: {0} [okta_url]'.format(code))
+	data = {'stateHandle': state_handle, 'credentials':{'passcode': code}}
+	url = '{0}/idp/idx/challenge/answer'.format(conf.okta_url)
+	_, h, j = send_json_req(conf, 'okta', 'idp/idx/challenge/answer', url, data)
+	success = j.get('success')
+	if success:
+		return success.get('href')
+	return None
+
+def okta_oie_login(conf, state_handle):
+	data = {'stateHandle': state_handle, 'identifier': conf.username, 'credentials': {'passcode': conf.password}}
+	url = '{0}/idp/idx/identify'.format(conf.okta_url)
+	_, h, j = send_json_req(conf, 'okta', 'idp/idx/identify', url, data)
+	state_handle, rem = okta_oie_parse_response(conf, j)
+	rem_saa = okta_oie_response_lookup(rem, 'value', 'name', 'select-authenticator-authenticate')
+	rem_saa_a = okta_oie_response_lookup(rem_saa, 'value', 'name', 'authenticator')
+
+	mfas = []
+	for aopt in rem_saa_a.get('options'):
+		label = aopt.get('label', '').strip()
+		if not label:
+			continue
+
+		aopt_form = aopt.get('value', {'form':{}}).get('form')
+		mfa_id, mfa_eid = None, None
+		for fi in aopt_form.get('value'):
+			fi_name = fi.get('name', '')
+			if not fi_name or fi_name == 'methodType':
+				continue
+			fi_req = fi.get('required', False)
+			if fi_req:
+				if fi_name == 'id':
+					mfa_id = fi.get('value')
+				elif fi_name == 'enrollmentId':
+					mfa_eid = fi.get('value')
+				else:
+					err('unknown mfa required field: {0}'.format(fi_name))
+		aopt_mto = aopt_idv = amt = okta_oie_response_lookup(aopt_form, 'value', 'name', 'methodType')
+		mfa_mts = []
+		if aopt_mto.get('value'):
+				mfa_mts.append(aopt_mto.get('value'))
+		else:
+			for mto in aopt_mto.get('options', []):
+				mt = mto.get('value')
+				if not mt:
+					continue
+				mfa_mts.append(mt)
+		for mt in mfa_mts:
+			mfa_type = mt
+			if mfa_type == 'otp':
+				mfa_type = 'totp'
+			mfa_provider = ''
+			if 'Google' in label:
+				mfa_provider = 'google'
+			if 'Okta' in label:
+				mfa_provider = 'okta'
+			priority = mfa_priority(conf, mfa_type, mfa_provider)
+			log('available mfa: {0} ({1})'.format(label, mt))
+			mfas.append({'name': label, 'id':mfa_id, 'eid': mfa_eid, 'provider': mfa_provider, 'type': mt, 'priority': priority})
+	if len(mfas) == 0:
+		err('no mfa found')
+	r = None # type: Optional[Dict[str, Any]]
+	for mfa in sorted(mfas, key=lambda x: x.get('priority', 0), reverse=True):
+		log('using mfa: {0}'.format(mfa.get('name')))
+		data = {'stateHandle': state_handle, 'authenticator':{'id': mfa.get('id'), 'methodType': mfa.get('type')}}
+		if mfa.get('eid'):
+			data['authenticator']['enrollmentId'] = mfa.get('eid')
+		url = '{0}/idp/idx/challenge'.format(conf.okta_url)
+		_, h, j = send_json_req(conf, 'okta', 'idp/idx/challenge', url, data)
+		state_handle, rem = okta_oie_parse_response(conf, j)
+		mtype = mfa.get('type')
+		if mtype == 'otp' or mtype == 'totp':
+			r = okta_oie_mfa_totp(conf, state_handle, mfa, rem)
+		elif mtype == 'sms':
+			r = okta_oie_mfa_sms(conf, state_handle, mfa, rem)
+		elif mtype == 'push':
+			r = okta_oie_mfa_push(conf, state_handle, mfa, rem)
+		#elif mtype == 'webauthn':
+		#   TODO
+		if r is not None:
+			break
+	if r is None:
+		err('no mfa processed')
+	return r
+
+def okta_oie(conf, state_token, gw_url):
+	# type: (Conf, str) -> Tuple[str, str]
+	if not state_token:
+		return None, None
+	url = '{0}/idp/idx/introspect'.format(conf.okta_url)
+	data = {'stateToken': state_token}
+	_, h, j = send_json_req(conf, 'okta', 'idp/idx/introspect', url, data)
+	state_handle, rem = okta_oie_parse_response(conf, j)
+
+	rurl = okta_oie_login(conf, state_handle)
+	_, h, c = send_req(conf, 'okta', 'redirect', rurl, {}, get=True)
+	xhtml = parse_html(c)
+	form_url, form_data = parse_form(xhtml, url)
+	dbg_form(conf, 'okta.redirect request', data)
+
+	if gw_url:
+		log('okta redirect form request [gateway]')
+		dest = 'gateway'
+		expected_url = gw_url # type: Optional[str]
+	else:
+		log('okta redirect form request [vpn_url]')
+		dest = 'portal'
+		expected_url = conf.vpn_url
+		purl, pexp = parse_url(form_url), parse_url(expected_url)
+		if purl != pexp:
+			# NOTE: redirect to nearest (geo) portal without any prior knowledge
+			warn('{0}: unexpected url found {1} != {2}'.format('redirect form', purl, pexp))
+			expected_url = None
+	_, h, c = send_req(conf, dest, 'redirect form', form_url, form_data, expected_url=expected_url)
+	saml_username = h.get('saml-username', '').strip()
+	prelogin_cookie = h.get('prelogin-cookie', '').strip()
+	if saml_username and prelogin_cookie:
+		saml_auth_status = h.get('saml-auth-status', '').strip()
+		saml_slo = h.get('saml-slo', '').strip()
+		dbg(conf.debug, 'saml prop', [saml_auth_status, saml_slo])
+		return saml_username, prelogin_cookie
+	return None, None
+
 def output_gateways(gateways):
 	# type: (Dict[str, str]) -> None
 	print("Gateways:")
@@ -951,12 +1138,19 @@ def main():
 		saml_xml = paloalto_prelogin(conf, gateway_url)
 
 	rsaml, redirect_url = okta_saml(conf, saml_xml)
-	token = okta_auth(conf)
-	log('sessionToken: {0}'.format(token))
-	if do_portal_login:
-		saml_username, prelogin_cookie = okta_redirect(conf, token, redirect_url)
+	oie = conf.get_bool('okta_oie') if conf.okta_oie.strip() != '' else True
+	if oie:
+		state_token = get_state_token(conf, rsaml)
+		dbg(conf.debug, 'stateToken: {0}'.format(state_token))
+		gw_url = gateway_url if do_portal_login else None
+		saml_username, prelogin_cookie = okta_oie(conf, state_token, gw_url)
 	else:
-		saml_username, prelogin_cookie = okta_redirect(conf, token, redirect_url, gateway_url)
+		token = okta_auth(conf)
+		log('sessionToken: {0}'.format(token))
+		if do_portal_login:
+			saml_username, prelogin_cookie = okta_redirect(conf, token, redirect_url)
+		else:
+			saml_username, prelogin_cookie = okta_redirect(conf, token, redirect_url, gateway_url)
 
 	userauthcookie = None
 	if do_portal_login or args.list_gateways:
