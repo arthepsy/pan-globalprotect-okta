@@ -881,6 +881,10 @@ def okta_oie_login(conf, state_handle):
 	data = {'stateHandle': state_handle, 'identifier': conf.username, 'credentials': {'passcode': conf.password}}
 	url = '{0}/idp/idx/identify'.format(conf.okta_url)
 	_, h, j = send_json_req(conf, 'okta', 'idp/idx/identify', url, data)
+	success = j.get('success')
+	if success:
+		rurl = success.get('href')
+		return rurl
 	state_handle, rem = okta_oie_parse_response(conf, j)
 	rem_saa = okta_oie_response_lookup(rem, 'value', 'name', 'select-authenticator-authenticate')
 	rem_saa_a = okta_oie_response_lookup(rem_saa, 'value', 'name', 'authenticator')
