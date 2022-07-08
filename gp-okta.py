@@ -151,6 +151,9 @@ def err(s):
 	print('[ERROR] {0}'.format(s), file=sys.stderr)
 	sys.exit(1)
 
+def _remx(c, v): return re.search(r'\s*' + v + r'\s*"?[=:]\s*(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')', c)
+_refx = lambda mx: to_b(mx.group(1)).decode('unicode_escape').strip()
+
 def parse_xml(xml):
 	# type: (str) -> etree._Element
 	try:
@@ -350,23 +353,28 @@ def mfa_priority(conf, ftype, fprovider):
 		priority += (512 - line_nr)
 	return priority
 
+
 def get_state_token(conf, c):
 	# type: (Conf, str) -> Optional[str]
-	rx_state_token = re.search(r'var\s*stateToken\s*=\s*\'([^\']+)\'', c)
+	rx_state_token = _remx(c, 'stateToken')
 	if not rx_state_token:
 		dbg(conf.debug, 'not found', 'stateToken')
 		return None
-	state_token = to_n(to_b(rx_state_token.group(1)).decode('unicode_escape').strip())
-	return state_token
+	return _refx(rx_state_token)
 
 def get_redirect_url(conf, c, current_url=None):
 	# type: (Conf, str, Optional[str]) -> Optional[str]
-	rx_base_url = re.search(r'"baseUrl":"([^"]+)",', c)
-	rx_from_uri = re.search(r'"fromUri":"([^"]+)",', c)
+	rx_redirect_url = _remx(c, 'redirectUri')
+	if rx_redirect_url:
+		redirect_uri = _refx(rx_redirect_url)
+		if redirect_uri.startswith('http'):
+			return redirect_uri
+	rx_base_url = _remx(c, 'baseUrl')
+	rx_from_uri = _remx(c, 'fromUri')
 	if not rx_from_uri:
-		dbg(conf.debug, 'not found', 'formUri')
+		dbg(conf.debug, 'not found', 'fromUri')
 		return None
-	from_uri = to_n(to_b(rx_from_uri.group(1)).decode('unicode_escape').strip())
+	from_uri = _refx(rx_from_uri)
 	if from_uri.startswith('http'):
 		return from_uri
 	if not rx_base_url:
@@ -374,7 +382,7 @@ def get_redirect_url(conf, c, current_url=None):
 		if current_url:
 			return urljoin(current_url, from_uri)
 		return from_uri
-	base_url = to_n(to_b(rx_base_url.group(1)).decode('unicode_escape').strip())
+	base_url = _refx(rx_base_url)
 	return base_url + from_uri
 
 def parse_url(url):
@@ -467,7 +475,7 @@ def okta_saml(conf, saml_xml):
 	redirect_url = get_redirect_url(conf, c, url)
 	if redirect_url is None:
 		err('did not find redirect url')
-	return redirect_url
+	return c, redirect_url
 
 def okta_auth(conf, stateToken=None):
 	# type: (Conf, Optional[str]) -> Any
@@ -942,7 +950,7 @@ def main():
 	else:
 		saml_xml = paloalto_prelogin(conf, gateway_url)
 
-	redirect_url = okta_saml(conf, saml_xml)
+	rsaml, redirect_url = okta_saml(conf, saml_xml)
 	token = okta_auth(conf)
 	log('sessionToken: {0}'.format(token))
 	if do_portal_login:
