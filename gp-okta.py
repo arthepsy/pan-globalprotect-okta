@@ -361,8 +361,8 @@ def get_state_token(conf, c):
 
 def get_redirect_url(conf, c, current_url=None):
 	# type: (Conf, str, Optional[str]) -> Optional[str]
-	rx_base_url = re.search(r'var\s*baseUrl\s*=\s*\'([^\']+)\'', c)
-	rx_from_uri = re.search(r'var\s*fromUri\s*=\s*\'([^\']+)\'', c)
+	rx_base_url = re.search(r'"baseUrl":"([^"]+)",', c)
+	rx_from_uri = re.search(r'"fromUri":"([^"]+)",', c)
 	if not rx_from_uri:
 		dbg(conf.debug, 'not found', 'formUri')
 		return None
