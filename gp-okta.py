@@ -822,6 +822,14 @@ def okta_oie_response_lookup(j, sk, k, v):
 			return sj
 	err('no "{0}" found as "{1}" in "{2}" items'.format(v, k, sk))
 
+def okta_oie_mfa_password(conf, state_handle, mfa, rem):
+	rem_ca = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-authenticator')
+	log('mfa password request')
+	data = {'stateHandle': state_handle, 'credentials':{'passcode': conf.password}}
+	url = '{0}/idp/idx/challenge/answer'.format(conf.okta_url)
+	_, h, j = send_json_req(conf, 'okta', 'idp/idx/challenge/answer', url, data)
+	return okta_oie_identify_parse(conf, state_handle, j)
+
 def okta_oie_mfa_totp(conf, state_handle, mfa, rem):
 	rem_ca = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-authenticator')
 	provider = mfa.get('provider', '')
@@ -837,16 +845,11 @@ def okta_oie_mfa_totp(conf, state_handle, mfa, rem):
 	code = code or ''
 	if not code:
 		return None
-
 	log('mfa {0} totp request: {1} [okta_url]'.format(mfa.get('provider'), code))
 	data = {'stateHandle': state_handle, 'credentials':{'passcode': code}}
 	url = '{0}/idp/idx/challenge/answer'.format(conf.okta_url)
 	_, h, j = send_json_req(conf, 'okta', 'idp/idx/challenge/answer', url, data)
-
-	success = j.get('success')
-	if success:
-		return success.get('href')
-	return None
+	return okta_oie_identify_parse(conf, state_handle, j)
 
 def okta_oie_mfa_push(conf, state_handle, mfa, rem):
 	rem_cp = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-poll')
@@ -872,15 +875,44 @@ def okta_oie_mfa_sms(conf, state_handle, mfa, rem):
 	data = {'stateHandle': state_handle, 'credentials':{'passcode': code}}
 	url = '{0}/idp/idx/challenge/answer'.format(conf.okta_url)
 	_, h, j = send_json_req(conf, 'okta', 'idp/idx/challenge/answer', url, data)
-	success = j.get('success')
-	if success:
-		return success.get('href')
-	return None
+	return okta_oie_identify_parse(conf, state_handle, j)
 
 def okta_oie_login(conf, state_handle):
+	url = '{0}/idp/idx/introspect'.format(conf.okta_url)
+	data = {'stateToken': state_handle}
+	_, h, j = send_json_req(conf, 'okta', 'idp/idx/introspect', url, data)
+	rem = j.get('remediation')
+	if not rem:
+		err('no remediation in response')
+	remv = rem.get('value')
+	if not remv:
+		err('no remediation value in response')
+	rem_identify = None
+	for ji in remv:
+		if ji.get('name') == 'identify':
+			rem_identify = ji
+			break
+	if not rem_identify:
+		err('no identify remediation in response')
+	riv = rem_identify.get('value')
+	if not riv:
+		err('no identify remediation value in response')
+	rif = []
+	for ji in riv:
+		if ji.get('required'):
+			fn = ji.get('name')
+			if not fn:
+				continue
+			rif.append(fn)
 	data = {'stateHandle': state_handle, 'identifier': conf.username, 'credentials': {'passcode': conf.password}}
+	for fn in list(data.keys()):
+		if not fn in rif:
+			del data[fn]
 	url = '{0}/idp/idx/identify'.format(conf.okta_url)
 	_, h, j = send_json_req(conf, 'okta', 'idp/idx/identify', url, data)
+	return okta_oie_identify_parse(conf, state_handle, j)
+
+def okta_oie_identify_parse(conf, state_handle, j):
 	success = j.get('success')
 	if success:
 		rurl = success.get('href')
@@ -943,7 +975,9 @@ def okta_oie_login(conf, state_handle):
 		_, h, j = send_json_req(conf, 'okta', 'idp/idx/challenge', url, data)
 		state_handle, rem = okta_oie_parse_response(conf, j)
 		mtype = mfa.get('type')
-		if mtype == 'otp' or mtype == 'totp':
+		if mtype == 'password':
+			r = okta_oie_mfa_password(conf, state_handle, mfa, rem)
+		elif mtype == 'otp' or mtype == 'totp':
 			r = okta_oie_mfa_totp(conf, state_handle, mfa, rem)
 		elif mtype == 'sms':
 			r = okta_oie_mfa_sms(conf, state_handle, mfa, rem)
