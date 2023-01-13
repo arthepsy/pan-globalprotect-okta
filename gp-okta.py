@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
    The MIT License (MIT)
@@ -152,7 +152,7 @@ def err(s):
 	sys.exit(1)
 
 def _remx(c, v): return re.search(r'\s*' + v + r'\s*"?[=:]\s*(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')', c)
-_refx = lambda mx: to_b(mx.group(1)).decode('unicode_escape').strip()
+_refx = lambda mx: to_b(mx.group(1) if mx.group(1) is not None else mx.group(2)).decode('unicode_escape').strip()
 
 def parse_xml(xml):
 	# type: (str) -> etree._Element
@@ -396,8 +396,8 @@ def _send_req_pre(conf, name, url, data, expected_url=None, v=True):
 	dbg_form(conf, 'send.req.data', data)
 	if expected_url:
 		purl, pexp = parse_url(url), parse_url(expected_url)
-		if purl != pexp:
-			err('{0}: unexpected url found {1} != {2}'.format(name, purl, pexp))
+		#if purl != pexp:
+		#	err('{0}: unexpected url found {1} != {2}'.format(name, purl, pexp))
 
 def _send_req_post(conf, r, name, can_fail=False):
 	# type: (Conf, requests.Response, str, bool) -> None

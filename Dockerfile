@@ -1,25 +1,24 @@
-FROM	alpine:3.10
+FROM debian:stable-slim
+LABEL maintainer="Stegen Smith <stegen@owns.com>"
 
-WORKDIR	/
+ENV HEALTCHECK_HOST $HEALTHCHECK_HOST
 
-RUN	apk update && apk add --no-cache \
-	curl git \
-	automake autoconf libtool gcc musl-dev make linux-headers \
-	gettext openssl-dev libxml2-dev lz4-dev libproxy-dev \
-	py2-lxml py2-requests py2-pip \
-	&& rm -rf /var/cache/apk/*
-RUN  pip install pyotp
+WORKDIR /vpn
 
+ADD scripts/run.sh run.sh
 
-RUN	mkdir -p /usr/local/sbin
-RUN	curl -o /usr/local/sbin/vpnc-script http://git.infradead.org/users/dwmw2/vpnc-scripts.git/blob_plain/HEAD:/vpnc-script
-RUN	chmod +x /usr/local/sbin/vpnc-script
+ADD gp-okta.py .
+ADD gp-okta.conf .
+ADD requirements.txt .
 
-RUN	git clone -b "v8.10" --single-branch --depth=1 https://gitlab.com/openconnect/openconnect.git
-WORKDIR	/openconnect
-RUN	./autogen.sh
-RUN	./configure --without-gnutls --with-vpnc-script=/usr/local/sbin/vpnc-script
-RUN	make check
-RUN	make
+RUN ln -fs /usr/share/zoneinfo/America/Los_Angeles /etc/localtime
 
-CMD	["/openconnect/gp-okta/gp-okta.py","/openconnect/gp-okta/gp-okta.conf"]
+RUN apt-get update && apt-get -y install bash curl iproute2 iptables iputils-ping \
+    less mtr net-tools openconnect procps python3-pip strace tcpdump vim
+
+RUN pip install -r requirements.txt
+
+HEALTHCHECK  --interval=10s --timeout=10s --start-period=10s \
+  CMD ping -c 3 $HEALTHCHECK_HOST
+
+CMD ["/vpn/run.sh"]

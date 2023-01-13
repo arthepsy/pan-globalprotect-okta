@@ -1,2 +1,5 @@
 *~
 .*cache/
+*.env
+*.bak
+*.local

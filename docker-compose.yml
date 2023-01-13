@@ -1,0 +1,37 @@
+version: '3'
+
+services:
+  vpn:
+    container_name: vpn
+    image: pan-globalprotect-okta:1.5.0
+    volumes:
+      - ./gp-okta.conf.local:/vpn/gp-okta.conf.local
+    environment:
+      - VPN_URL=${VPN_URL}
+      - VPN_GATEWAY=${OKTA_GATEWAY}
+      - OKTA_URL=${OKTA_URL}
+      - OKTA_USERNAME=${OKTA_USERNAME}
+      - OKTA_PASSWORD=${OKTA_PASSWORD}
+      - TOTP=${TOTP}
+      - HEALTHCHECK_HOST=${HEALTHCHECK_HOST}
+      - ADDITIONAL_OPENCONNECT_ARGS=${ADDITIONAL_OPENCONNECT_ARGS}
+      - ADDITIONAL_COMMANDS=${ADDITIONAL_COMMANDS}
+    networks:
+      vpn_network:
+        ipv4_address: 172.32.0.200
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - SYS_PTRACE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    restart: "no"
+    security_opt:
+      - label:disable
+
+networks:
+  vpn_network:
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.32.0.0/24
