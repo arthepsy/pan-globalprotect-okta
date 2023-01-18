@@ -32,6 +32,8 @@ from __future__ import print_function
 import argparse, base64, getpass, io, os, re, shlex, signal, subprocess, sys, tempfile, time, traceback
 import requests
 from lxml import etree
+import ssl
+import urllib3
 
 if sys.version_info >= (3,):
 	from urllib.parse import urlparse, urljoin  # pylint: disable=import-error
@@ -152,7 +154,7 @@ def err(s):
 	sys.exit(1)
 
 def _remx(c, v): return re.search(r'\s*' + v + r'\s*"?[=:]\s*(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')', c)
-_refx = lambda mx: to_b(mx.group(1)).decode('unicode_escape').strip()
+_refx = lambda mx: to_b(mx.group(1) if mx.group(1) is not None else mx.group(2)).decode('unicode_escape').strip()
 
 def parse_xml(xml):
 	# type: (str) -> etree._Element
@@ -192,6 +194,21 @@ def parse_form(html, current_url=None):
 		if k and v:
 			data[k] = v
 	return url, data
+
+
+class CustomHttpAdapter (requests.adapters.HTTPAdapter):
+	'''Transport adapter" that allows us to use custom ssl_context from https://stackoverflow.com/a/71646353.'''
+
+	def __init__(self, ssl_context=None, **kwargs):
+		self.ssl_context = ssl_context
+		super().__init__(**kwargs)
+
+	def init_poolmanager(self, connections, maxsize, block=False):
+		self.poolmanager = urllib3.poolmanager.PoolManager(
+			num_pools=connections, maxsize=maxsize,
+			block=block, ssl_context=self.ssl_context)
+
+
 
 class Conf(object):
 	def __init__(self):
@@ -326,6 +343,13 @@ class Conf(object):
 		conf.debug = conf._store.get('debug', '').lower() in ['1', 'true']
 		s = requests.Session()
 		s.headers['User-Agent'] = 'PAN GlobalProtect'
+
+		# OP_LEGACY_SERVER_CONNECT
+		if conf._store.get('enable_unsafe_legacy_renegotiation', '') in ['1', 'true']:
+			ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+			ctx.options |= 0x4
+			s.mount('https://', CustomHttpAdapter(ctx))
+
 		conf._session = s
 		return conf
 
@@ -742,16 +766,16 @@ def paloalto_getconfig(conf, username=None, prelogin_cookie=None, can_fail=False
 	log('getconfig request [vpn_url]')
 	url = '{0}/global-protect/getconfig.esp'.format(conf.vpn_url)
 	data = {
-        #'jnlpReady': 'jnlpReady',
-        #'ok': 'Login',
-        #'direct': 'yes',
+		#'jnlpReady': 'jnlpReady',
+		#'ok': 'Login',
+		#'direct': 'yes',
 		'clientVer': '4100',
-        #'prot': 'https:',
+		#'prot': 'https:',
 		'clientos': 'Windows',
 		'os-version': 'Microsoft Windows 10 Pro, 64-bit',
-        #'server': '',
+		#'server': '',
 		'computer': 'DESKTOP',
-        #'preferred-ip': '',
+		#'preferred-ip': '',
 		'inputStr': '',
 		'user': username or conf.username,
 		'passwd': '' if prelogin_cookie else conf.password,
@@ -1055,13 +1079,13 @@ def choose_gateway_url(conf, gateways):
 def run_openconnect(conf, do_portal_auth, urls, saml_username, cookies):
 	# type: (Conf, bool, Dict[str, str], str, Dict[str, str]) -> int
 	if do_portal_auth:
-	    url = urls.get('portal')
-	    cookie_type = 'portal:portal-userauthcookie'
-	    cookie = cookies.get('userauthcookie')
+		url = urls.get('portal')
+		cookie_type = 'portal:portal-userauthcookie'
+		cookie = cookies.get('userauthcookie')
 	else:
-	    url = urls.get('gateway')
-	    cookie_type = 'gateway:prelogin-cookie'
-	    cookie = cookies.get('prelogin-cookie')
+		url = urls.get('gateway')
+		cookie_type = 'gateway:prelogin-cookie'
+		cookie = cookies.get('prelogin-cookie')
 	if cookie is None or cookie == 'empty':
 		err('empty "{0}" cookie'.format(cookie_type))
 
