@@ -816,14 +816,33 @@ def okta_oie_parse_response(conf, j):
 		err('remediation in response is not array')
 	return state_handle, rem
 
+def okta_oie_response_error(msg, j=None, rem=None):
+	emsg = msg
+	if j is not None:
+		for jmv in j.get('messages', {}).get('value', []):
+			m = jmv.get('message', '')
+			if not m: continue
+			emsg += '\n\tmessage: ' + m
+	if rem is not None:
+		rem_names = []
+		for jrv in rem.get('value', []):
+			name = jrv.get('name', '')
+			if not name: continue
+			rem_names.append(name)
+		if len(rem_names) > 0:
+			emsg += '\n\t' + 'remediations: ' + ', '.join(rem_names)
+	err(emsg)
+
 def okta_oie_response_lookup(j, sk, k, v):
 	for sj in j.get(sk, []):
 		if sj.get(k) == v:
-			return sj
-	err('no "{0}" found as "{1}" in "{2}" items'.format(v, k, sk))
+			return True, sj
+	return False, 'no "{0}" found as "{1}" in "{2}" items'.format(v, k, sk)
 
 def okta_oie_mfa_password(conf, state_handle, mfa, rem):
-	rem_ca = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-authenticator')
+	ok, rem_ca = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-authenticator')
+	if not ok:
+		okta_oie_response_error(rem_ca, None, rem)
 	log('mfa password request')
 	data = {'stateHandle': state_handle, 'credentials':{'passcode': conf.password}}
 	url = '{0}/idp/idx/challenge/answer'.format(conf.okta_url)
@@ -831,7 +850,9 @@ def okta_oie_mfa_password(conf, state_handle, mfa, rem):
 	return okta_oie_identify_parse(conf, state_handle, j)
 
 def okta_oie_mfa_totp(conf, state_handle, mfa, rem):
-	rem_ca = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-authenticator')
+	ok, rem_ca = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-authenticator')
+	if not ok:
+		okta_oie_response_error(rem_ca, None, rem)
 	provider = mfa.get('provider', '')
 	secret = conf.get_value('totp.{0}'.format(provider))
 	code = None
@@ -852,7 +873,9 @@ def okta_oie_mfa_totp(conf, state_handle, mfa, rem):
 	return okta_oie_identify_parse(conf, state_handle, j)
 
 def okta_oie_mfa_push(conf, state_handle, mfa, rem):
-	rem_cp = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-poll')
+	ok, rem_cp = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-poll')
+	if not ok:
+		okta_oie_response_error(rem_cp, None, rem)
 	c = 0
 	while True:
 		if c > 10:
@@ -869,7 +892,9 @@ def okta_oie_mfa_push(conf, state_handle, mfa, rem):
 		c += 1
 
 def okta_oie_mfa_sms(conf, state_handle, mfa, rem):
-	rem_ca = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-authenticator')
+	ok, rem_ca = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-authenticator')
+	if not ok:
+		okta_oie_response_error(rem_ca, None, rem)
 	code = input('SMS verification code: ').strip()
 	log('mfa sms request: {0} [okta_url]'.format(code))
 	data = {'stateHandle': state_handle, 'credentials':{'passcode': code}}
@@ -918,8 +943,34 @@ def okta_oie_identify_parse(conf, state_handle, j):
 		rurl = success.get('href')
 		return rurl
 	state_handle, rem = okta_oie_parse_response(conf, j)
-	rem_saa = okta_oie_response_lookup(rem, 'value', 'name', 'select-authenticator-authenticate')
-	rem_saa_a = okta_oie_response_lookup(rem_saa, 'value', 'name', 'authenticator')
+	ok, rem_saa = okta_oie_response_lookup(rem, 'value', 'name', 'select-authenticator-authenticate')
+	if not ok:
+		is_expiring = False
+		msgs = j.get('messages', {}).get('value', [])
+		if len(msgs) > 0:
+			for jm in msgs:
+				if jm.get('i18n', {}).get('key', '') == 'idx.password.expiring.message':
+					is_expiring = True
+					break
+				if 'password expires' in jm.get('message', ''):
+					is_expiring = True
+					break
+		if is_expiring:
+			can_skip = True
+			for jremv in rem.get('value', []):
+				if jremv.get('name', '') == 'skip':
+					can_skip = True
+					break
+			if can_skip:
+				warn('Password expiring soon')
+				data = {'stateHandle': state_handle}
+				url = '{0}/idp/idx/skip'.format(conf.okta_url)
+				_, h, j = send_json_req(conf, 'okta', 'idp/idx/skip', url, data)
+				return okta_oie_identify_parse(conf, state_handle, j)
+		okta_oie_response_error(rem_saa, j, rem)
+	ok, rem_saa_a = okta_oie_response_lookup(rem_saa, 'value', 'name', 'authenticator')
+	if not ok:
+		okta_oie_response_error(rem_saa_a, j, rem)
 
 	mfas = []
 	for aopt in rem_saa_a.get('options'):
@@ -941,7 +992,9 @@ def okta_oie_identify_parse(conf, state_handle, j):
 					mfa_eid = fi.get('value')
 				else:
 					err('unknown mfa required field: {0}'.format(fi_name))
-		aopt_mto = aopt_idv = amt = okta_oie_response_lookup(aopt_form, 'value', 'name', 'methodType')
+		ok, aopt_mto = okta_oie_response_lookup(aopt_form, 'value', 'name', 'methodType')
+		if not ok:
+			okta_oie_response_error(aopt_mto, None, None)
 		mfa_mts = []
 		if aopt_mto.get('value'):
 				mfa_mts.append(aopt_mto.get('value'))
