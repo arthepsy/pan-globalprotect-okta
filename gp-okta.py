@@ -955,18 +955,22 @@ def okta_oie_identify_parse(conf, state_handle, j):
 				if 'password expires' in jm.get('message', ''):
 					is_expiring = True
 					break
+		rem_names = []
+		can_skip = False 
+		for jremv in rem.get('value', []):
+			rem_name = jremv.get('name', '')
+			rem_names.append(rem_name)
+			if rem_name == 'skip':
+				can_skip = True
 		if is_expiring:
-			can_skip = True
-			for jremv in rem.get('value', []):
-				if jremv.get('name', '') == 'skip':
-					can_skip = True
-					break
+			warn('Password expiring soon')
 			if can_skip:
-				warn('Password expiring soon')
 				data = {'stateHandle': state_handle}
 				url = '{0}/idp/idx/skip'.format(conf.okta_url)
 				_, h, j = send_json_req(conf, 'okta', 'idp/idx/skip', url, data)
 				return okta_oie_identify_parse(conf, state_handle, j)
+		if rem_names == ['reenroll-authenticator']:
+			warn('Password most probably expired')
 		okta_oie_response_error(rem_saa, j, rem)
 	ok, rem_saa_a = okta_oie_response_lookup(rem_saa, 'value', 'name', 'authenticator')
 	if not ok:
