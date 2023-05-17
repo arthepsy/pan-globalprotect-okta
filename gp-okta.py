@@ -30,8 +30,9 @@
    THE SOFTWARE.
 """
 from __future__ import print_function
-import argparse, base64, getpass, io, os, re, shlex, signal, subprocess, sys, tempfile, time, traceback
+import argparse, base64, getpass, io, os, re, shlex, signal, subprocess, sys, ssl, tempfile, time, traceback
 import requests
+import requests.adapters
 from lxml import etree
 
 if sys.version_info >= (3,):
@@ -153,8 +154,11 @@ def err(s):
 	print('[ERROR] {0}'.format(s), file=sys.stderr)
 	sys.exit(1)
 
-def _remx(c, v): return re.search(r'\s*' + v + r'\s*"?[=:]\s*(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')', c)
-_refx = lambda mx: to_b(mx.group(1)).decode('unicode_escape').strip()
+def _remx(c, v):
+	return re.search(r'\s*' + v + r'\s*"?[=:]\s*(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')', c)
+
+def _refx(mx):
+	return to_b(mx.group(1) or mx.group(2)).decode('unicode_escape').strip()
 
 def parse_xml(xml):
 	# type: (str) -> etree._Element
@@ -194,6 +198,14 @@ def parse_form(html, current_url=None):
 		if k and v:
 			data[k] = v
 	return url, data
+
+class InsecureHTTPAdapter(requests.adapters.HTTPAdapter):
+	def __init__(self, *, ssl_context, **kwargs):
+		self._ssl_context = ssl_context
+		super().__init__(**kwargs)
+
+	def init_poolmanager(self, connections, maxsize, **kwargs):
+		super().init_poolmanager(connections, maxsize, **kwargs, ssl_context=self._ssl_context)
 
 class Conf(object):
 	def __init__(self):
@@ -327,6 +339,9 @@ class Conf(object):
 				setattr(conf, k, conf._store[k].strip())
 		conf.debug = conf._store.get('debug', '').lower() in ['1', 'true']
 		s = requests.Session()
+		ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+		ctx.options |= 0x4
+		s.mount('https://', InsecureHTTPAdapter(ssl_context=ctx))
 		s.headers['User-Agent'] = 'PAN GlobalProtect'
 		conf._session = s
 		return conf
@@ -1103,6 +1118,7 @@ def run_openconnect(conf, do_portal_auth, urls, saml_username, cookies):
 	if conf.get_bool('execute'):
 		ecmd = [os.path.expandvars(os.path.expanduser(x)) for x in shlex.split(cmd)]
 		pp = subprocess.Popen(shlex.split(pcmd), stdout=subprocess.PIPE)
+		print(f"Command: {ecmd}")
 		cp = subprocess.Popen(ecmd, stdin=pp.stdout, stdout=sys.stdout)
 		if pp.stdout is not None:
 			pp.stdout.close()
