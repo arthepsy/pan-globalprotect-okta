@@ -397,7 +397,7 @@ def _send_req_pre(conf, name, url, data, expected_url=None, v=True):
 	if expected_url:
 		purl, pexp = parse_url(url), parse_url(expected_url)
 		if purl != pexp:
-			err('{0}: unexpected url found {1} != {2}'.format(name, purl, pexp))
+			warn('{0}: unexpected url found {1} != {2}'.format(name, purl, pexp))
 
 def _send_req_post(conf, r, name, can_fail=False):
 	# type: (Conf, requests.Response, str, bool) -> None
