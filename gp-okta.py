@@ -3,7 +3,7 @@
 """
    The MIT License (MIT)
 
-   Copyright (C) 2018-2020 Andris Raugulis (moo@arthepsy.eu)
+   Copyright (C) 2018-2023 Andris Raugulis (moo@arthepsy.eu)
    Copyright (C) 2018 Nick Lanham (nick@afternight.org)
    Copyright (C) 2019 Aaron Lindsay (aclindsa@gmail.com)
    Copyright (C) 2019 Taylor Dean (taylor@makeshift.dev)
@@ -236,7 +236,7 @@ class Conf(object):
 		return v.lower() in ['1', 'true']
 
 	def add_cert(self, cert, name='unknown'):
-		# type: (str, str) -> None
+		# type: (Union[binary_type, text_type], str) -> None
 		if not cert:
 			return
 		if name in ['vpn_cli', 'okta_cli', 'okta_url']:
@@ -467,7 +467,7 @@ def paloalto_prelogin(conf, gateway_url=None):
 	return saml_xml
 
 def okta_saml(conf, saml_xml):
-	# type: (Conf, str) -> str
+	# type: (Conf, str) -> Tuple[str, str]
 	log('okta saml request [okta_url]')
 	url, data = parse_form(saml_xml)
 	dbg_form(conf, 'okta.saml request', data)
@@ -478,7 +478,7 @@ def okta_saml(conf, saml_xml):
 	return c, redirect_url
 
 def okta_auth(conf, stateToken=None):
-	# type: (Conf, Optional[str]) -> Any
+	# type: (Conf, Optional[str]) -> str
 	log('okta auth request [okta_url]')
 	url = '{0}/api/v1/authn'.format(conf.okta_url)
 	data = {
@@ -493,13 +493,13 @@ def okta_auth(conf, stateToken=None):
 	}
 	_, _h, j = send_json_req(conf, 'okta', 'auth', url, data)
 	while True:
-		ok, r = okta_transaction_state(conf, j)
+		ok, t, r = okta_transaction_state(conf, j)
 		if ok:
-			return r
+			return t
 		j = r
 
 def okta_transaction_state(conf, j):
-	# type: (Conf, Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]
+	# type: (Conf, Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]
 	# https://developer.okta.com/docs/api/resources/authn#transaction-state
 	status = j.get('status', '').strip().lower()
 	dbg(conf.debug, 'status', status)
@@ -515,7 +515,7 @@ def okta_transaction_state(conf, j):
 			err('empty state token')
 		data = {'stateToken': state_token}
 		_, _h, j = send_json_req(conf, 'okta', 'skip', url, data, expected_url=conf.okta_url)
-		return False, j
+		return False, '', j
 	# status: password_expired
 	# status: recovery
 	# status: recovery_challenge
@@ -526,7 +526,7 @@ def okta_transaction_state(conf, j):
 	# status: mfa_required
 	if status == 'mfa_required':
 		j = okta_mfa(conf, j)
-		return False, j
+		return False, '', j
 	# status: mfa_challenge
 	# status: success
 	if status != 'success':
@@ -535,7 +535,7 @@ def okta_transaction_state(conf, j):
 	session_token = j.get('sessionToken', '').strip()
 	if not session_token:
 		err('empty session token')
-	return True, session_token
+	return True, session_token, j
 
 def okta_mfa(conf, j):
 	# type: (Conf, Dict[str, Any]) -> Dict[str, Any]
@@ -1049,9 +1049,9 @@ def okta_oie_identify_parse(conf, state_handle, j):
 	return r
 
 def okta_oie(conf, state_token, gw_url):
-	# type: (Conf, str) -> Tuple[str, str]
+	# type: (Conf, Optional[str], Optional[str]) -> Tuple[str, str]
 	if not state_token:
-		return None, None
+		err('okta oie: no state token')
 	url = '{0}/idp/idx/introspect'.format(conf.okta_url)
 	data = {'stateToken': state_token}
 	_, h, j = send_json_req(conf, 'okta', 'idp/idx/introspect', url, data)
@@ -1084,7 +1084,7 @@ def okta_oie(conf, state_token, gw_url):
 		saml_slo = h.get('saml-slo', '').strip()
 		dbg(conf.debug, 'saml prop', [saml_auth_status, saml_slo])
 		return saml_username, prelogin_cookie
-	return None, None
+	err('okta oie: username or cookie empty')
 
 def output_gateways(gateways):
 	# type: (Dict[str, str]) -> None
@@ -1187,7 +1187,7 @@ def read_conf(fp, gpg_decrypt, gpg_home):
 		err('config file "{0}" does not exist'.format(fp))
 	cc = ''
 	with io.open(fp, 'rb') as fh:
-		cc = fh.read()
+		cc = to_u(fh.read())
 	if fp.lower().endswith('.gpg') and not gpg_decrypt:
 		gpg_decrypt = True
 		log('conf file looks like gpg encrypted. trying decryption')
@@ -1200,7 +1200,7 @@ def read_conf(fp, gpg_decrypt, gpg_home):
 		dc = gpg.decrypt(cc)
 		if not dc.ok:
 			err('failed to decrypt config file. status: {0}, error:\n {1}'.format(dc.status, dc.stderr))
-		cc = dc.data
+		cc = to_u(dc.data)
 	return cc
 
 def main():
