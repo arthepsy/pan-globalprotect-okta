@@ -126,7 +126,7 @@ def dbg(d, h, *xs):
 	if not d:
 		return
 	for x in xs:
-		if not isinstance(x, dict) and not isinstance(x, list):
+		if not isinstance(x, (dict, list, tuple)):
 			for line in x.split('\n'):
 				print(u'[DEBUG] {0}: {1}'.format(h, line))
 		else:
