@@ -152,7 +152,7 @@ def err(s):
 	sys.exit(1)
 
 def _remx(c, v): return re.search(r'\s*' + v + r'\s*"?[=:]\s*(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')', c)
-_refx = lambda mx: to_b(mx.group(1)).decode('unicode_escape').strip()
+_refx = lambda mx: to_b(mx.group(1) if mx.group(2) is None else mx.group(2)).decode('unicode_escape').strip()
 
 def parse_xml(xml):
 	# type: (str) -> etree._Element
@@ -867,7 +867,7 @@ def okta_oie_mfa_totp(conf, state_handle, mfa, rem):
 	if not code:
 		return None
 	log('mfa {0} totp request: {1} [okta_url]'.format(mfa.get('provider'), code))
-	data = {'stateHandle': state_handle, 'credentials':{'passcode': code}}
+	data = {'stateHandle': state_handle, 'credentials':{'totp': code}}
 	url = '{0}/idp/idx/challenge/answer'.format(conf.okta_url)
 	_, h, j = send_json_req(conf, 'okta', 'idp/idx/challenge/answer', url, data)
 	return okta_oie_identify_parse(conf, state_handle, j)
