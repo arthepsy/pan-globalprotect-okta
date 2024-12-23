@@ -32,6 +32,7 @@ from __future__ import print_function
 import argparse, base64, getpass, io, os, re, shlex, signal, subprocess, sys, tempfile, time, traceback
 import requests
 from lxml import etree
+import json
 
 if sys.version_info >= (3,):
 	from urllib.parse import urlparse, urljoin  # pylint: disable=import-error
@@ -152,7 +153,7 @@ def err(s):
 	sys.exit(1)
 
 def _remx(c, v): return re.search(r'\s*' + v + r'\s*"?[=:]\s*(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\')', c)
-_refx = lambda mx: to_b(mx.group(1)).decode('unicode_escape').strip()
+_refx = lambda mx: to_b(mx.group(1) if mx.group(2) is None else mx.group(2)).decode('unicode_escape').strip()
 
 def parse_xml(xml):
 	# type: (str) -> etree._Element
@@ -363,27 +364,23 @@ def get_state_token(conf, c):
 	return _refx(rx_state_token)
 
 def get_redirect_url(conf, c, current_url=None):
-	# type: (Conf, str, Optional[str]) -> Optional[str]
-	rx_redirect_url = _remx(c, 'redirectUri')
-	if rx_redirect_url:
-		redirect_uri = _refx(rx_redirect_url)
-		if redirect_uri.startswith('http'):
-			return redirect_uri
-	rx_base_url = _remx(c, 'baseUrl')
-	rx_from_uri = _remx(c, 'fromUri')
-	if not rx_from_uri:
-		dbg(conf.debug, 'not found', 'fromUri')
-		return None
-	from_uri = _refx(rx_from_uri)
-	if from_uri.startswith('http'):
-		return from_uri
-	if not rx_base_url:
-		dbg(conf.debug, 'not found', 'baseUri')
-		if current_url:
-			return urljoin(current_url, from_uri)
-		return from_uri
-	base_url = _refx(rx_base_url)
-	return base_url + from_uri
+    # type: (Conf, str, Optional[str]) -> Optional[str]
+    modelDataBag = _remx(c, 'modelDataBag')
+    modelDataBag = json.loads(_refx(modelDataBag))
+    dbg(conf.debug, 'modelDataBag', modelDataBag)
+    base_url = modelDataBag.get('baseUrl', '')
+    from_uri = modelDataBag.get('fromURI', '')
+    if not from_uri:
+        dbg(conf.debug, 'not found', 'fromUri')
+        return None
+    if from_uri.startswith('http'):
+        return from_uri
+    if not base_url:
+        dbg(conf.debug, 'not found', 'baseUri')
+        if current_url:
+            return urljoin(current_url, from_uri)
+        return from_uri
+    return base_url + from_uri
 
 def parse_url(url):
 	# type: (str) -> Tuple[str, str]
@@ -867,7 +864,7 @@ def okta_oie_mfa_totp(conf, state_handle, mfa, rem):
 	if not code:
 		return None
 	log('mfa {0} totp request: {1} [okta_url]'.format(mfa.get('provider'), code))
-	data = {'stateHandle': state_handle, 'credentials':{'passcode': code}}
+	data = {'stateHandle': state_handle, 'credentials':{'totp': code}}
 	url = '{0}/idp/idx/challenge/answer'.format(conf.okta_url)
 	_, h, j = send_json_req(conf, 'okta', 'idp/idx/challenge/answer', url, data)
 	return okta_oie_identify_parse(conf, state_handle, j)
