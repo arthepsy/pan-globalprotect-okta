@@ -474,7 +474,7 @@ def okta_saml(conf, saml_xml):
 	_, _h, c = send_req(conf, 'okta', 'saml', url, data, expected_url=conf.okta_url)
 	redirect_url = get_redirect_url(conf, c, url)
 	if redirect_url is None:
-		err('did not find redirect url')
+		dbg(conf.debug, 'okta saml', 'no redirect url (Okta Identity Engine widget); continuing via OIE state token')
 	return c, redirect_url
 
 def okta_auth(conf, stateToken=None):
@@ -872,18 +872,42 @@ def okta_oie_mfa_totp(conf, state_handle, mfa, rem):
 	_, h, j = send_json_req(conf, 'okta', 'idp/idx/challenge/answer', url, data)
 	return okta_oie_identify_parse(conf, state_handle, j)
 
+def _find_correct_answer(o):
+	# type: (Any) -> Optional[str]
+	if isinstance(o, dict):
+		if o.get('correctAnswer'):
+			return o.get('correctAnswer')
+		for v in o.values():
+			r = _find_correct_answer(v)
+			if r:
+				return r
+	elif isinstance(o, list):
+		for v in o:
+			r = _find_correct_answer(v)
+			if r:
+				return r
+	return None
+
 def okta_oie_mfa_push(conf, state_handle, mfa, rem):
 	ok, rem_cp = okta_oie_response_lookup(rem, 'value', 'name', 'challenge-poll')
 	if not ok:
 		okta_oie_response_error(rem_cp, None, rem)
 	c = 0
+	shown = False
 	while True:
-		if c > 10:
+		if c > 30:
 			err('waiting for push notification too long')
 		log('mfa poll for push notification [okta_url]')
 		data = {'stateHandle': state_handle}
 		url = '{0}/idp/idx/authenticators/poll'.format(conf.okta_url)
 		_, h, j = send_json_req(conf, 'okta', 'idp/idx/authenticators/poll', url, data)
+		if not shown:
+			num = _find_correct_answer(j)
+			if num:
+				log('=====================================================')
+				log('  OKTA VERIFY: TAP  >>> {0} <<<  ON YOUR PHONE'.format(num))
+				log('=====================================================')
+				shown = True
 		state_handle = j.get('stateHandle')
 		success = j.get('success')
 		if success:
