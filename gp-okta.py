@@ -428,7 +428,7 @@ def send_json_req(conf, dest, name, url, data, get=False, expected_url=None, can
 	if get:
 		r = s.get(url, headers=headers, verify=v)
 	else:
-		r = s.post(url, headers=headers, json=data, verify=v)
+		r = s.post(url, headers=headers, json=data, verify=v, timeout=30)
 	_send_req_post(conf, r, name, can_fail)
 	return r.status_code, r.headers, parse_rjson(r)
 
