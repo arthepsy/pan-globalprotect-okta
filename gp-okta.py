@@ -413,9 +413,9 @@ def send_req(conf, dest, name, url, data, get=False, expected_url=None, can_fail
 	_send_req_pre(conf, name, url, data, expected_url, v)
 	s = conf.get_session(dest)
 	if get:
-		r = s.get(url, verify=v)
+		r = s.get(url, verify=v, timeout=30)
 	else:
-		r = s.post(url, data=data, verify=v)
+		r = s.post(url, data=data, verify=v, timeout=30)
 	_send_req_post(conf, r, name, can_fail)
 	return r.status_code, r.headers, r.text
 
@@ -426,7 +426,7 @@ def send_json_req(conf, dest, name, url, data, get=False, expected_url=None, can
 	headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
 	s = conf.get_session(dest)
 	if get:
-		r = s.get(url, headers=headers, verify=v)
+		r = s.get(url, headers=headers, verify=v, timeout=30)
 	else:
 		r = s.post(url, headers=headers, json=data, verify=v, timeout=30)
 	_send_req_post(conf, r, name, can_fail)
